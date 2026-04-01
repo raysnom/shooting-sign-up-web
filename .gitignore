@@ -32,9 +32,17 @@ yarn-error.log*
 .env
 .env*.local
 
+# sensitive data
+member_passwords.txt
+members_import.csv
+
+# claude code local settings
+.claude/settings.local.json
+
 # vercel
 .vercel
 
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+nul

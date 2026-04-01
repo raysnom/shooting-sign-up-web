@@ -222,3 +222,30 @@ For each training session, the system **randomly selects one EXCO member who is 
 | Promote a member to EXCO | President |
 | Transfer presidency | President |
 | Archive graduated seniors | President |
+
+---
+
+## Permissions Summary
+
+| Feature | Member | EXCO | President |
+|---------|--------|------|-----------|
+| View Schedule | ✅ | ✅ | ✅ |
+| Submit Preferences | ✅ | ✅ | ✅ |
+| View Profile | ✅ | ✅ | ✅ |
+| Cancel Slots | ✅ | ✅ | ✅ |
+| Mark Attendance | ❌ | ✅ | ✅ |
+| Manage Guns | ❌ | ✅ | ✅ |
+| Manage Sessions | ❌ | ❌ | ✅ |
+| Run Draft | ❌ | ❌ | ✅ |
+| Manage Members | ❌ | ❌ | ✅ |
+| Set Competition Flags | ❌ | ❌ | ✅ |
+| Set Requirements | ❌ | ❌ | ✅ |
+| Create Semesters | ❌ | ❌ | ✅ |
+| Handover Roles | ❌ | ❌ | ✅ |
+
+---
+
+## 📖 Documentation
+
+- **For users:** See **[FEATURES.md](FEATURES.md)** for a detailed guide on what each page does and how to use the system.
+- **For developers:** See **[CLAUDE.md](CLAUDE.md)** for technical implementation details (database schema, architecture, coding conventions).
