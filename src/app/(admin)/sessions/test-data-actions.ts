@@ -4,12 +4,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 
-function requireDevEnvironment() {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("Test data functions are not available in production.");
-  }
-}
-
 async function verifyPresident() {
   const supabase = await createClient();
   const {
@@ -28,7 +22,7 @@ async function verifyPresident() {
 }
 
 export async function generateTestPreferences(weekId: string) {
-  requireDevEnvironment();
+
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
 
@@ -159,7 +153,7 @@ export async function generateTestPreferences(weekId: string) {
 }
 
 export async function generateTestAttendance(weekId: string) {
-  requireDevEnvironment();
+
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
 
@@ -256,7 +250,7 @@ export async function generateTestAttendance(weekId: string) {
 }
 
 export async function clearTestData(weekId: string) {
-  requireDevEnvironment();
+
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
 
