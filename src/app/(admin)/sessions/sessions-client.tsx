@@ -307,7 +307,7 @@ export function SessionsClient({
   async function handleRunDraft() {
     if (!selectedWeek) return;
 
-    if (selectedWeek.status !== "closed") {
+    if (selectedWeek.status !== "closed" && selectedWeek.status !== "drafting") {
       setMessageType("error");
       setMessage("Draft can only run on weeks with status 'closed'.");
       return;

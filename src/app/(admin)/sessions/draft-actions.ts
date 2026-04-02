@@ -66,7 +66,11 @@ export async function runDraft(weekId: string) {
     .single();
 
   if (weekError || !week) return { error: "Week not found." };
-  if (week.status !== "closed") {
+
+  // If stuck at "drafting" from a previous crashed run, reset to "closed" first
+  if (week.status === "drafting") {
+    await admin.from("weeks").update({ status: "closed" as WeekStatus }).eq("id", weekId);
+  } else if (week.status !== "closed") {
     return { error: "Draft can only run on weeks with status 'closed'." };
   }
 
