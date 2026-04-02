@@ -40,15 +40,6 @@ import {
 
 const DAYS: DayType[] = ["mon", "tue", "wed", "thu", "fri", "sat"];
 
-const DAY_ORDER: Record<DayType, number> = {
-  mon: 0,
-  tue: 1,
-  wed: 2,
-  thu: 3,
-  fri: 4,
-  sat: 5,
-};
-
 function formatTime(time: string) {
   // Convert "15:00" or "15:00:00" to "3:00 PM"
   const [h, m] = time.split(":");
@@ -88,11 +79,8 @@ export function TemplatesClient({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // Add form state
-  const [addForm, setAddForm] = useState<TemplateForm>({ ...emptyForm });
-
-  // Edit form state
-  const [editForm, setEditForm] = useState<TemplateForm>({ ...emptyForm });
+  const [addForm, setAddForm] = useState<TemplateForm>(emptyForm);
+  const [editForm, setEditForm] = useState<TemplateForm>(emptyForm);
 
   // Group templates by day
   const grouped = DAYS.map((day) => ({
@@ -118,7 +106,7 @@ export function TemplatesClient({
       setMessage(`Error: ${result.error}`);
     } else {
       setMessage("Template created successfully.");
-      setAddForm({ ...emptyForm });
+      setAddForm(emptyForm);
       setShowAdd(false);
     }
     setLoading(false);
@@ -201,9 +189,7 @@ export function TemplatesClient({
             onValueChange={(v) => v && setForm({ ...form, day: v as DayType })}
           >
             <SelectTrigger className="w-full">
-              <SelectValue>
-                {(value) => DAY_LABELS[value as DayType] || value}
-              </SelectValue>
+              <SelectValue placeholder="Select a day" />
             </SelectTrigger>
             <SelectContent>
               {DAYS.map((d) => (
@@ -295,7 +281,13 @@ export function TemplatesClient({
               Seed Defaults
             </Button>
           )}
-          <Dialog open={showAdd} onOpenChange={setShowAdd}>
+          <Dialog
+            open={showAdd}
+            onOpenChange={(open) => {
+              setShowAdd(open);
+              if (!open) setMessage(null);
+            }}
+          >
             <DialogTrigger render={<Button />}>Add Template</DialogTrigger>
             <DialogContent>
               <DialogHeader>
@@ -400,7 +392,10 @@ export function TemplatesClient({
       <Dialog
         open={!!editingTemplate}
         onOpenChange={(open) => {
-          if (!open) setEditingTemplate(null);
+          if (!open) {
+            setEditingTemplate(null);
+            setMessage(null);
+          }
         }}
       >
         <DialogContent>
@@ -423,7 +418,10 @@ export function TemplatesClient({
       <Dialog
         open={!!deletingTemplate}
         onOpenChange={(open) => {
-          if (!open) setDeletingTemplate(null);
+          if (!open) {
+            setDeletingTemplate(null);
+            setMessage(null);
+          }
         }}
       >
         <DialogContent>
@@ -454,7 +452,13 @@ export function TemplatesClient({
       </Dialog>
 
       {/* ── Seed Confirmation Dialog ── */}
-      <Dialog open={showSeedConfirm} onOpenChange={setShowSeedConfirm}>
+      <Dialog
+        open={showSeedConfirm}
+        onOpenChange={(open) => {
+          setShowSeedConfirm(open);
+          if (!open) setMessage(null);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Seed Default Templates</DialogTitle>

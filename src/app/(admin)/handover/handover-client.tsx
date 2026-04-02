@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { Member } from "@/types/database";
 import { TEAM_LABELS } from "@/lib/constants";
 import {
@@ -32,6 +32,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
+
+const REDIRECT_DELAY_MS = 2000;
 
 export function HandoverClient({
   members,
@@ -42,25 +52,47 @@ export function HandoverClient({
 }) {
   const [loading, setLoading] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageType, setMessageType] = useState<"error" | "success">("success");
   const [transferTarget, setTransferTarget] = useState<Member | null>(null);
+  const [promoteTarget, setPromoteTarget] = useState<Member | null>(null);
+  const [demoteTarget, setDemoteTarget] = useState<Member | null>(null);
+  const [transferSelectId, setTransferSelectId] = useState("");
 
-  async function handlePromote(memberId: string) {
-    setLoading(memberId);
+  const handleConfirmPromote = useCallback(async () => {
+    if (!promoteTarget) return;
+    setLoading(promoteTarget.id);
     setMessage(null);
-    const result = await promoteToExco(memberId);
-    if (result.error) setMessage(`Error: ${result.error}`);
+    const result = await promoteToExco(promoteTarget.id);
+    if (result.error) {
+      setMessageType("error");
+      setMessage(result.error);
+    } else {
+      setMessageType("success");
+      setMessage(`${promoteTarget.name} promoted to EXCO.`);
+      setTimeout(() => setMessage(null), 5000);
+    }
+    setPromoteTarget(null);
     setLoading(null);
-  }
+  }, [promoteTarget]);
 
-  async function handleDemote(memberId: string) {
-    setLoading(memberId);
+  const handleConfirmDemote = useCallback(async () => {
+    if (!demoteTarget) return;
+    setLoading(demoteTarget.id);
     setMessage(null);
-    const result = await demoteToMember(memberId);
-    if (result.error) setMessage(`Error: ${result.error}`);
+    const result = await demoteToMember(demoteTarget.id);
+    if (result.error) {
+      setMessageType("error");
+      setMessage(result.error);
+    } else {
+      setMessageType("success");
+      setMessage(`${demoteTarget.name} demoted to member.`);
+      setTimeout(() => setMessage(null), 5000);
+    }
+    setDemoteTarget(null);
     setLoading(null);
-  }
+  }, [demoteTarget]);
 
-  async function handleTransfer() {
+  const handleTransfer = useCallback(async () => {
     if (!transferTarget) return;
     setLoading("transfer");
     setMessage(null);
@@ -68,33 +100,34 @@ export function HandoverClient({
     const result = await transferPresidency(transferTarget.id);
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
-      setMessage(
-        `Presidency transferred to ${transferTarget.name}. You are now EXCO. Redirecting...`
-      );
+      setMessageType("success");
+      setMessage(`Presidency transferred to ${transferTarget.name}. You are now EXCO. Redirecting...`);
       setTimeout(() => {
         window.location.href = "/schedule";
-      }, 2000);
+      }, REDIRECT_DELAY_MS);
     }
     setTransferTarget(null);
     setLoading(null);
-  }
+  }, [transferTarget]);
 
-  const otherMembers = members.filter((m) => m.id !== currentUserId);
+  const handleCloseDialog = useCallback(() => {
+    setTransferTarget(null);
+  }, []);
+
+  const otherMembers = useMemo(
+    () => members.filter((m) => m.id !== currentUserId),
+    [members, currentUserId]
+  );
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Handover & Roles</h1>
 
       {message && (
-        <div
-          className={`rounded-md p-3 text-sm ${
-            message.startsWith("Error")
-              ? "bg-red-50 text-red-700"
-              : "bg-green-50 text-green-700"
-          }`}
-        >
+        <div className={`rounded-md p-3 text-sm ${messageType === "error" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
           {message}
         </div>
       )}
@@ -103,10 +136,43 @@ export function HandoverClient({
         <CardHeader>
           <CardTitle>Transfer Presidency</CardTitle>
           <CardDescription>
-            Transfer your President role to another member. You will be demoted
-            to EXCO. This action cannot be undone by you.
+            Transfer your President role to another member. You will be demoted to EXCO. This action cannot be undone by you.
           </CardDescription>
         </CardHeader>
+        <CardContent>
+          <div className="flex items-end gap-3">
+            <div className="flex-1 space-y-2">
+              <Label>Select member to transfer to</Label>
+              <Select value={transferSelectId} onValueChange={(v) => setTransferSelectId(v ?? "")}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Choose a member">
+                    {(value) => {
+                      const m = otherMembers.find((mem) => mem.id === value);
+                      return m ? `${m.name} (${m.role})` : "Choose a member";
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {otherMembers.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name} ({m.role})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              variant="destructive"
+              disabled={!transferSelectId || loading === "transfer"}
+              onClick={() => {
+                const member = otherMembers.find((m) => m.id === transferSelectId);
+                if (member) setTransferTarget(member);
+              }}
+            >
+              Transfer
+            </Button>
+          </div>
+        </CardContent>
       </Card>
 
       <div className="rounded-md border bg-white">
@@ -141,7 +207,7 @@ export function HandoverClient({
                       variant="outline"
                       size="sm"
                       disabled={loading === member.id}
-                      onClick={() => handlePromote(member.id)}
+                      onClick={() => setPromoteTarget(member)}
                     >
                       Promote to EXCO
                     </Button>
@@ -151,18 +217,11 @@ export function HandoverClient({
                       variant="outline"
                       size="sm"
                       disabled={loading === member.id}
-                      onClick={() => handleDemote(member.id)}
+                      onClick={() => setDemoteTarget(member)}
                     >
                       Demote to Member
                     </Button>
                   )}
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setTransferTarget(member)}
-                  >
-                    Transfer Presidency
-                  </Button>
                 </TableCell>
               </TableRow>
             ))}
@@ -170,11 +229,44 @@ export function HandoverClient({
         </Table>
       </div>
 
+      {/* Promote Confirmation */}
+      <Dialog open={!!promoteTarget} onOpenChange={(open) => { if (!open) setPromoteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Promote to EXCO</DialogTitle>
+            <DialogDescription>
+              Promote <strong>{promoteTarget?.name}</strong> to EXCO? They will gain access to attendance marking and other EXCO features.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setPromoteTarget(null)}>Cancel</Button>
+            <Button disabled={loading === promoteTarget?.id} onClick={handleConfirmPromote}>
+              {loading === promoteTarget?.id ? "Promoting..." : "Confirm Promote"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Demote Confirmation */}
+      <Dialog open={!!demoteTarget} onOpenChange={(open) => { if (!open) setDemoteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Demote to Member</DialogTitle>
+            <DialogDescription>
+              Demote <strong>{demoteTarget?.name}</strong> to regular member? They will lose EXCO privileges.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDemoteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" disabled={loading === demoteTarget?.id} onClick={handleConfirmDemote}>
+              {loading === demoteTarget?.id ? "Demoting..." : "Confirm Demote"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Transfer confirmation dialog */}
-      <Dialog
-        open={!!transferTarget}
-        onOpenChange={() => setTransferTarget(null)}
-      >
+      <Dialog open={!!transferTarget} onOpenChange={handleCloseDialog}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Transfer Presidency</DialogTitle>
@@ -186,7 +278,7 @@ export function HandoverClient({
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setTransferTarget(null)}>
+            <Button variant="outline" onClick={handleCloseDialog}>
               Cancel
             </Button>
             <Button

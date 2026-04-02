@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { Week, Session, Preference, DayType } from "@/types/database";
 import { DAY_LABELS } from "@/lib/constants";
 import { submitPreferences } from "./actions";
@@ -126,17 +126,17 @@ export function PreferencesClient({
   // Handlers
   // ──────────────────────────────────────────────
 
-  function handleAdd(sessionId: string) {
+  const handleAdd = useCallback((sessionId: string) => {
     setRankedIds((prev) => [...prev, sessionId]);
     setMessage(null);
-  }
+  }, []);
 
-  function handleRemove(sessionId: string) {
+  const handleRemove = useCallback((sessionId: string) => {
     setRankedIds((prev) => prev.filter((id) => id !== sessionId));
     setMessage(null);
-  }
+  }, []);
 
-  function handleMoveUp(index: number) {
+  const handleMoveUp = useCallback((index: number) => {
     if (index === 0) return;
     setRankedIds((prev) => {
       const next = [...prev];
@@ -144,19 +144,22 @@ export function PreferencesClient({
       return next;
     });
     setMessage(null);
-  }
+  }, []);
 
-  function handleMoveDown(index: number) {
-    if (index >= rankedIds.length - 1) return;
-    setRankedIds((prev) => {
-      const next = [...prev];
-      [next[index], next[index + 1]] = [next[index + 1], next[index]];
-      return next;
-    });
-    setMessage(null);
-  }
+  const handleMoveDown = useCallback(
+    (index: number) => {
+      if (index >= rankedIds.length - 1) return;
+      setRankedIds((prev) => {
+        const next = [...prev];
+        [next[index], next[index + 1]] = [next[index + 1], next[index]];
+        return next;
+      });
+      setMessage(null);
+    },
+    [rankedIds.length]
+  );
 
-  async function handleSubmit() {
+  const handleSubmit = useCallback(async () => {
     setLoading(true);
     setMessage(null);
 
@@ -173,7 +176,7 @@ export function PreferencesClient({
       setMessage("Preferences submitted successfully.");
     }
     setLoading(false);
-  }
+  }, [rankedIds, week.id]);
 
   // ──────────────────────────────────────────────
   // Interactive view (with warning if deadline passed)

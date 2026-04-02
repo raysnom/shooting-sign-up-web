@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { GunTypeEnum } from "@/types/database";
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -31,12 +32,12 @@ async function verifyExcoOrAbove() {
 // Create a gun
 // ──────────────────────────────────────────────
 
-type CreateGunInput = {
+type GunInput = {
   name: string;
   type: GunTypeEnum;
 };
 
-export async function createGun(input: CreateGunInput) {
+export async function createGun(input: GunInput) {
   const { error: authError } = await verifyExcoOrAbove();
   if (authError) return { error: authError };
 
@@ -46,24 +47,20 @@ export async function createGun(input: CreateGunInput) {
     type: input.type,
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/guns");
-  return { success: true };
+  return {};
 }
 
 // ──────────────────────────────────────────────
 // Update a gun
 // ──────────────────────────────────────────────
 
-type UpdateGunInput = {
-  name: string;
-  type: GunTypeEnum;
-};
-
-export async function updateGun(id: string, data: UpdateGunInput) {
+export async function updateGun(id: string, data: GunInput) {
   const { error: authError } = await verifyExcoOrAbove();
   if (authError) return { error: authError };
+  if (!isValidUUID(id)) return { error: "Invalid gun ID." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -71,10 +68,10 @@ export async function updateGun(id: string, data: UpdateGunInput) {
     .update({ name: data.name, type: data.type })
     .eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/guns");
-  return { success: true };
+  return {};
 }
 
 // ──────────────────────────────────────────────
@@ -84,14 +81,15 @@ export async function updateGun(id: string, data: UpdateGunInput) {
 export async function deleteGun(id: string) {
   const { error: authError } = await verifyExcoOrAbove();
   if (authError) return { error: authError };
+  if (!isValidUUID(id)) return { error: "Invalid gun ID." };
 
   const admin = createAdminClient();
   const { error } = await admin.from("guns").delete().eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/guns");
-  return { success: true };
+  return {};
 }
 
 // ──────────────────────────────────────────────
@@ -104,17 +102,38 @@ export async function assignGunToMember(
 ) {
   const { error: authError } = await verifyExcoOrAbove();
   if (authError) return { error: authError };
+  if (!isValidUUID(memberId)) return { error: "Invalid member ID." };
+  if (gunId !== null && !isValidUUID(gunId)) return { error: "Invalid gun ID." };
 
   const admin = createAdminClient();
+
+  // Verify member exists
+  const { data: member } = await admin
+    .from("members")
+    .select("id")
+    .eq("id", memberId)
+    .single();
+  if (!member) return { error: "Member not found." };
+
+  // Verify gun exists (if assigning)
+  if (gunId) {
+    const { data: gun } = await admin
+      .from("guns")
+      .select("id")
+      .eq("id", gunId)
+      .single();
+    if (!gun) return { error: "Gun not found." };
+  }
+
   const { error } = await admin
     .from("members")
     .update({ gun_id: gunId })
     .eq("id", memberId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/guns");
-  return { success: true };
+  return {};
 }
 
 // ──────────────────────────────────────────────
@@ -172,7 +191,7 @@ export async function bulkImportGuns(
     if (!trimmed) continue;
     const firstCol = trimmed.split("\t")[0]?.trim();
     // A gun number is alphanumeric (e.g. 749268, KHA9258, 16808435)
-    if (firstCol && /^[A-Za-z0-9]+$/.test(firstCol) && assembledLines.length >= 0) {
+    if (firstCol && /^[A-Za-z0-9]+$/.test(firstCol)) {
       assembledLines.push(trimmed);
     } else if (assembledLines.length > 0) {
       // Continuation of previous line (multi-name cell with newlines)

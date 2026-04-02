@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import type { Week, Session, DayType } from "@/types/database";
+import type { Week, Session } from "@/types/database";
 import type { AllocationWithDetails, ExcoDutyWithDetails } from "./page";
-import { DAY_LABELS } from "@/lib/constants";
+import { DAY_LABELS, DAYS, DAY_ORDER } from "@/lib/constants";
 import { publishWeek, rerunDraft } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,27 +33,15 @@ import {
 } from "@/components/ui/dialog";
 
 // ──────────────────────────────────────────────
-// Constants
-// ──────────────────────────────────────────────
-
-const DAYS: DayType[] = ["mon", "tue", "wed", "thu", "fri", "sat"];
-
-const DAY_ORDER: Record<DayType, number> = {
-  mon: 0,
-  tue: 1,
-  wed: 2,
-  thu: 3,
-  fri: 4,
-  sat: 5,
-};
-
-// ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
 
+const PUBLISH_REDIRECT_DELAY_MS = 1500;
+const DRAFT_REDIRECT_DELAY_MS = 1500;
+const SUCCESS_MESSAGE_AUTO_DISMISS_MS = 5000;
+
 function formatDate(dateStr: string) {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-SG", {
+  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-SG", {
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -63,8 +51,8 @@ function formatDate(dateStr: string) {
 function formatTime(time: string) {
   const [h, m] = time.split(":");
   const hour = parseInt(h, 10);
-  const ampm = hour >= 12 ? "PM" : "AM";
   const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+  const ampm = hour >= 12 ? "PM" : "AM";
   return `${displayHour}:${m} ${ampm}`;
 }
 
@@ -86,99 +74,164 @@ export function DraftReviewClient({
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageType, setMessageType] = useState<"error" | "success">("success");
   const [showRerunConfirm, setShowRerunConfirm] = useState(false);
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
 
-  // ── Summary stats ──
-  const totalAllocations = allocations.length;
-  const liveFireCount = allocations.filter((a) => a.type === "live").length;
-  const dryFireCount = allocations.filter((a) => a.type === "dry").length;
-  const uniqueMembers = new Set(allocations.map((a) => a.member_id)).size;
+  // ── Summary stats (memoized) ──
+  const stats = useMemo(() => {
+    const totalAllocations = allocations.length;
+    const liveFireCount = allocations.filter((a) => a.type === "live").length;
+    const dryFireCount = allocations.filter((a) => a.type === "dry").length;
+    const uniqueMembers = new Set(allocations.map((a) => a.member_id)).size;
+    return { totalAllocations, liveFireCount, dryFireCount, uniqueMembers };
+  }, [allocations]);
 
-  // ── Sessions sorted and grouped by day ──
-  const sortedSessions = [...sessions]
-    .filter((s) => !s.is_cancelled)
-    .sort((a, b) => {
-      const dayDiff = DAY_ORDER[a.day] - DAY_ORDER[b.day];
-      if (dayDiff !== 0) return dayDiff;
-      return a.time_start.localeCompare(b.time_start);
+  // ── Sessions sorted and grouped by day (memoized) ──
+  const sortedSessions = useMemo(() => {
+    return sessions
+      .filter((s) => !s.is_cancelled)
+      .sort((a, b) => {
+        const dayDiff = DAY_ORDER[a.day] - DAY_ORDER[b.day];
+        if (dayDiff !== 0) return dayDiff;
+        return a.time_start.localeCompare(b.time_start);
+      });
+  }, [sessions]);
+
+  // ── Calculate unused slots per session (memoized) ──
+  const sessionUnusedSlots = useMemo(() => {
+    return sortedSessions.map((session) => {
+      const sessionAllocations = allocations.filter((a) => a.session_id === session.id);
+      const liveUsed = sessionAllocations.filter((a) => a.type === "live").length;
+      const dryUsed = sessionAllocations.filter((a) => a.type === "dry").length;
+      const liveRemaining = session.live_lanes - liveUsed;
+      const dryRemaining = session.dry_lanes - dryUsed;
+      return {
+        session,
+        liveUsed,
+        dryUsed,
+        liveRemaining,
+        dryRemaining,
+        hasUnused: liveRemaining > 0 || dryRemaining > 0,
+      };
     });
+  }, [sortedSessions, allocations]);
 
-  // ── Calculate unused slots per session ──
-  const sessionUnusedSlots = sortedSessions.map((session) => {
-    const sessionAllocations = allocations.filter((a) => a.session_id === session.id);
-    const liveUsed = sessionAllocations.filter((a) => a.type === "live").length;
-    const dryUsed = sessionAllocations.filter((a) => a.type === "dry").length;
-    const liveRemaining = session.live_lanes - liveUsed;
-    const dryRemaining = session.dry_lanes - dryUsed;
-    return {
-      session,
-      liveUsed,
-      dryUsed,
-      liveRemaining,
-      dryRemaining,
-      hasUnused: liveRemaining > 0 || dryRemaining > 0,
-    };
-  }).filter((s) => !s.session.is_cancelled);
+  const hasUnusedSlots = useMemo(
+    () => sessionUnusedSlots.some((s) => s.hasUnused),
+    [sessionUnusedSlots]
+  );
 
-  const hasUnusedSlots = sessionUnusedSlots.some((s) => s.hasUnused);
+  // ── Grouped sessions by day (memoized) ──
+  const grouped = useMemo(() => {
+    const sessionsByDay = new Map<string, Session[]>();
+    for (const session of sortedSessions) {
+      const list = sessionsByDay.get(session.day) ?? [];
+      list.push(session);
+      sessionsByDay.set(session.day, list);
+    }
 
-  const grouped = DAYS.map((day) => ({
-    day,
-    label: DAY_LABELS[day],
-    sessions: sortedSessions.filter((s) => s.day === day),
-  })).filter((g) => g.sessions.length > 0);
+    return DAYS.map((day) => ({
+      day,
+      label: DAY_LABELS[day],
+      sessions: sessionsByDay.get(day) ?? [],
+    })).filter((g) => g.sessions.length > 0);
+  }, [sortedSessions]);
 
-  // ── Build lookup maps ──
-  const excoDutyBySession = new Map<string, ExcoDutyWithDetails[]>();
-  for (const duty of excoDuties) {
-    const existing = excoDutyBySession.get(duty.session_id) || [];
-    existing.push(duty);
-    excoDutyBySession.set(duty.session_id, existing);
-  }
+  // ── Build lookup maps (memoized) ──
+  const excoDutyBySession = useMemo(() => {
+    const map = new Map<string, ExcoDutyWithDetails[]>();
+    for (const duty of excoDuties) {
+      const list = map.get(duty.session_id) ?? [];
+      list.push(duty);
+      map.set(duty.session_id, list);
+    }
+    return map;
+  }, [excoDuties]);
 
-  const allocationsBySession = new Map<string, AllocationWithDetails[]>();
-  for (const alloc of allocations) {
-    const existing = allocationsBySession.get(alloc.session_id) || [];
-    existing.push(alloc);
-    allocationsBySession.set(alloc.session_id, existing);
-  }
+  const allocationsBySession = useMemo(() => {
+    const map = new Map<string, AllocationWithDetails[]>();
+    for (const alloc of allocations) {
+      const list = map.get(alloc.session_id) ?? [];
+      list.push(alloc);
+      map.set(alloc.session_id, list);
+    }
+    return map;
+  }, [allocations]);
+
+  // ── Auto-dismiss success messages (except for "Redirecting..." messages) ──
+  useEffect(() => {
+    if (message && messageType === "success" && !message.includes("Redirecting")) {
+      const timer = setTimeout(() => {
+        setMessage(null);
+      }, SUCCESS_MESSAGE_AUTO_DISMISS_MS);
+      return () => clearTimeout(timer);
+    }
+  }, [message, messageType]);
 
   // ── Handlers ──
-
-  async function handlePublish() {
+  const handlePublish = useCallback(async () => {
     setLoading(true);
     setMessage(null);
+    setShowPublishConfirm(false);
 
     const result = await publishWeek(week.id);
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
       setLoading(false);
     } else {
+      setMessageType("success");
       setMessage("Results published successfully! Redirecting...");
+      setLoading(false);
       setTimeout(() => {
         router.push("/sessions");
-      }, 1500);
+      }, PUBLISH_REDIRECT_DELAY_MS);
     }
-  }
+  }, [week.id, router]);
 
-  async function handleRerunDraft() {
+  const handleRerunDraft = useCallback(async () => {
     setLoading(true);
     setMessage(null);
 
     const result = await rerunDraft(week.id);
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
       setLoading(false);
+      setShowRerunConfirm(false);
     } else {
+      setMessageType("success");
       setMessage("Draft cleared. Week reset to closed. Redirecting...");
+      setLoading(false);
       setShowRerunConfirm(false);
       setTimeout(() => {
         router.push("/sessions");
-      }, 1500);
+      }, DRAFT_REDIRECT_DELAY_MS);
     }
-  }
+  }, [week.id, router]);
+
+  const handleOpenRerunConfirm = useCallback(() => {
+    setShowRerunConfirm(true);
+  }, []);
+
+  const handleCloseRerunConfirm = useCallback(() => {
+    setShowRerunConfirm(false);
+  }, []);
+
+  const handleOpenPublishConfirm = useCallback(() => {
+    setShowPublishConfirm(true);
+  }, []);
+
+  const handleClosePublishConfirm = useCallback(() => {
+    setShowPublishConfirm(false);
+  }, []);
+
+  const handleBackToSessions = useCallback(() => {
+    router.push("/sessions");
+  }, [router]);
 
   // ──────────────────────────────────────────────
   // Render
@@ -201,7 +254,7 @@ export function DraftReviewClient({
       {message && (
         <div
           className={`rounded-md p-3 text-sm ${
-            message.startsWith("Error")
+            messageType === "error"
               ? "bg-red-50 text-red-700"
               : "bg-green-50 text-green-700"
           }`}
@@ -225,19 +278,19 @@ export function DraftReviewClient({
         <CardContent>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div className="rounded-md border p-3 text-center">
-              <p className="text-2xl font-bold">{totalAllocations}</p>
+              <p className="text-2xl font-bold">{stats.totalAllocations}</p>
               <p className="text-xs text-muted-foreground">Total Allocations</p>
             </div>
             <div className="rounded-md border p-3 text-center">
-              <p className="text-2xl font-bold">{liveFireCount}</p>
+              <p className="text-2xl font-bold">{stats.liveFireCount}</p>
               <p className="text-xs text-muted-foreground">Live Fire</p>
             </div>
             <div className="rounded-md border p-3 text-center">
-              <p className="text-2xl font-bold">{dryFireCount}</p>
+              <p className="text-2xl font-bold">{stats.dryFireCount}</p>
               <p className="text-xs text-muted-foreground">Dry Fire</p>
             </div>
             <div className="rounded-md border p-3 text-center">
-              <p className="text-2xl font-bold">{uniqueMembers}</p>
+              <p className="text-2xl font-bold">{stats.uniqueMembers}</p>
               <p className="text-xs text-muted-foreground">Members Allocated</p>
             </div>
           </div>
@@ -298,20 +351,20 @@ export function DraftReviewClient({
 
       {/* ── Action Buttons ── */}
       <div className="flex gap-3">
-        <Button onClick={handlePublish} disabled={loading}>
+        <Button onClick={handleOpenPublishConfirm} disabled={loading}>
           {loading ? "Processing..." : "Publish Results"}
         </Button>
         <Button
           variant="outline"
           className="text-red-600 hover:text-red-700"
-          onClick={() => setShowRerunConfirm(true)}
+          onClick={handleOpenRerunConfirm}
           disabled={loading}
         >
           Re-run Draft
         </Button>
         <Button
           variant="ghost"
-          onClick={() => router.push("/sessions")}
+          onClick={handleBackToSessions}
           disabled={loading}
         >
           Back to Sessions
@@ -335,18 +388,15 @@ export function DraftReviewClient({
               <h2 className="mb-3 text-lg font-semibold">{group.label}</h2>
               <div className="space-y-4">
                 {group.sessions.map((session) => {
-                  const sessionAllocations =
-                    allocationsBySession.get(session.id) || [];
+                  const sessionAllocations = allocationsBySession.get(session.id) ?? [];
                   const liveAllocations = sessionAllocations
                     .filter((a) => a.type === "live")
                     .sort((a, b) => b.priority_score - a.priority_score);
                   const dryAllocations = sessionAllocations
                     .filter((a) => a.type === "dry")
                     .sort((a, b) => b.priority_score - a.priority_score);
-                  const sessionExco = excoDutyBySession.get(session.id) || [];
-                  const excoMemberIds = new Set(
-                    sessionExco.map((e) => e.member_id)
-                  );
+                  const sessionExco = excoDutyBySession.get(session.id) ?? [];
+                  const excoMemberIds = new Set(sessionExco.map((e) => e.member_id));
 
                   return (
                     <Card key={session.id}>
@@ -467,8 +517,34 @@ export function DraftReviewClient({
         </div>
       )}
 
+      {/* ── Publish Results Confirmation Dialog ── */}
+      <Dialog open={showPublishConfirm} onOpenChange={handleClosePublishConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Publish Draft Results</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to publish these draft results? Members will be able to see their schedules.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={handleClosePublishConfirm}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={loading}
+              onClick={handlePublish}
+            >
+              {loading ? "Publishing..." : "Confirm Publish"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Re-run Draft Confirmation Dialog ── */}
-      <Dialog open={showRerunConfirm} onOpenChange={setShowRerunConfirm}>
+      <Dialog open={showRerunConfirm} onOpenChange={handleCloseRerunConfirm}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Re-run Draft</DialogTitle>
@@ -482,7 +558,7 @@ export function DraftReviewClient({
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
-              onClick={() => setShowRerunConfirm(false)}
+              onClick={handleCloseRerunConfirm}
             >
               Cancel
             </Button>

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { Member, TeamType, LevelType, RoleType, DivisionType } from "@/types/database";
-import { TEAM_LABELS, DIVISION_MAP, DIVISION_LABELS } from "@/lib/constants";
+import { DIVISION_MAP, DIVISION_LABELS } from "@/lib/constants";
 import { createMember, bulkUploadMembers, archiveMember } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,40 +32,99 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+// ──────────────────────────────────────────────
+// Constants
+// ──────────────────────────────────────────────
+
 const teams: TeamType[] = ["APW", "APM", "ARM", "ARW"];
 const levels: LevelType[] = ["JH1", "JH2", "JH3", "JH4", "SH1", "SH2"];
 const roles: RoleType[] = ["member", "exco", "president"];
+
+const INITIAL_FORM_STATE = {
+  login_id: "",
+  name: "",
+  email: "",
+  team: "APW" as TeamType,
+  level: "JH1" as LevelType,
+  role: "member" as RoleType,
+};
 
 export function MembersClient({ members }: { members: Member[] }) {
   const [showAdd, setShowAdd] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageType, setMessageType] = useState<"error" | "success">("success");
   const [filter, setFilter] = useState<"active" | "archived">("active");
   const [filterTeam, setFilterTeam] = useState<TeamType | "all">("all");
   const [filterLevel, setFilterLevel] = useState<LevelType | "all">("all");
   const [filterDivision, setFilterDivision] = useState<DivisionType | "all">("all");
+  const [archiveTarget, setArchiveTarget] = useState<Member | null>(null);
+  const [archiving, setArchiving] = useState(false);
 
-  // Add member form state
-  const [form, setForm] = useState({
-    login_id: "",
-    name: "",
-    email: "",
-    team: "APW" as TeamType,
-    level: "JH1" as LevelType,
-    role: "member" as RoleType,
-  });
-
-  // Bulk upload state
+  const [form, setForm] = useState(INITIAL_FORM_STATE);
   const [csvContent, setCsvContent] = useState("");
 
-  const filteredMembers = members.filter((m) => {
-    if (filter === "active" ? m.archived : !m.archived) return false;
-    if (filterTeam !== "all" && m.team !== filterTeam) return false;
-    if (filterLevel !== "all" && m.level !== filterLevel) return false;
-    if (filterDivision !== "all" && DIVISION_MAP[m.level] !== filterDivision) return false;
-    return true;
-  });
+  // ──────────────────────────────────────────────
+  // Memoized values
+  // ──────────────────────────────────────────────
+
+  const { filteredMembers, activeCount, archivedCount } = useMemo(() => {
+    const active = members.filter((m) => !m.archived);
+    const archived = members.filter((m) => m.archived);
+
+    const filtered = members.filter((m) => {
+      if (filter === "active" && m.archived) return false;
+      if (filter === "archived" && !m.archived) return false;
+      if (filterTeam !== "all" && m.team !== filterTeam) return false;
+      if (filterLevel !== "all" && m.level !== filterLevel) return false;
+      if (filterDivision !== "all" && DIVISION_MAP[m.level] !== filterDivision) return false;
+      return true;
+    });
+
+    return {
+      filteredMembers: filtered,
+      activeCount: active.length,
+      archivedCount: archived.length,
+    };
+  }, [members, filter, filterTeam, filterLevel, filterDivision]);
+
+  // ──────────────────────────────────────────────
+  // Callbacks
+  // ──────────────────────────────────────────────
+
+  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setCsvContent(event.target?.result as string);
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const handleArchiveConfirm = useCallback(async () => {
+    if (!archiveTarget) return;
+
+    setArchiving(true);
+    const result = await archiveMember(archiveTarget.id);
+
+    if ("error" in result && result.error) {
+      setMessageType("error");
+      setMessage(result.error);
+    } else {
+      setMessageType("success");
+      setMessage(`${archiveTarget.name} has been archived.`);
+      setTimeout(() => setMessage(null), 5000);
+    }
+
+    setArchiving(false);
+    setArchiveTarget(null);
+  }, [archiveTarget]);
+
+  // ──────────────────────────────────────────────
+  // Server actions
+  // ──────────────────────────────────────────────
 
   async function handleAddMember(e: React.FormEvent) {
     e.preventDefault();
@@ -74,18 +133,14 @@ export function MembersClient({ members }: { members: Member[] }) {
 
     const result = await createMember(form);
 
-    if (result.error) {
-      setMessage(`Error: ${result.error}`);
+    if ("error" in result && result.error) {
+      setMessageType("error");
+      setMessage(result.error);
     } else {
+      setMessageType("success");
       setMessage("Member created and invite sent!");
-      setForm({
-        login_id: "",
-        name: "",
-        email: "",
-        team: "APW",
-        level: "JH1",
-        role: "member",
-      });
+      setTimeout(() => setMessage(null), 5000);
+      setForm(INITIAL_FORM_STATE);
       setShowAdd(false);
     }
     setLoading(false);
@@ -98,39 +153,25 @@ export function MembersClient({ members }: { members: Member[] }) {
 
     const result = await bulkUploadMembers(csvContent);
 
-    if (result.error) {
-      setMessage(`Error: ${result.error}`);
-    } else {
+    if ("error" in result && result.error) {
+      setMessageType("error");
+      setMessage(result.error);
+    } else if ("results" in result) {
       const failed = result.results.filter((r) => !r.success);
       if (failed.length > 0) {
+        setMessageType("error");
         setMessage(
           `${result.summary}. Failed: ${failed.map((f) => `${f.email} (${f.error})`).join(", ")}`
         );
       } else {
+        setMessageType("success");
         setMessage(`${result.summary}`);
+        setTimeout(() => setMessage(null), 5000);
       }
       setCsvContent("");
       setShowBulk(false);
     }
     setLoading(false);
-  }
-
-  async function handleArchive(memberId: string) {
-    if (!confirm("Are you sure you want to archive this member?")) return;
-    const result = await archiveMember(memberId);
-    if (result.error) {
-      setMessage(`Error: ${result.error}`);
-    }
-  }
-
-  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setCsvContent(event.target?.result as string);
-    };
-    reader.readAsText(file);
   }
 
   return (
@@ -196,7 +237,7 @@ export function MembersClient({ members }: { members: Member[] }) {
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue>{(value) => value}</SelectValue>
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {teams.map((t) => (
@@ -216,7 +257,7 @@ export function MembersClient({ members }: { members: Member[] }) {
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue>{(value) => value}</SelectValue>
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {levels.map((l) => (
@@ -236,9 +277,7 @@ export function MembersClient({ members }: { members: Member[] }) {
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue>
-                          {(value) => value.charAt(0).toUpperCase() + value.slice(1)}
-                        </SelectValue>
+                        <SelectValue placeholder="Select role" className="capitalize" />
                       </SelectTrigger>
                       <SelectContent>
                         {roles.map((r) => (
@@ -295,7 +334,7 @@ export function MembersClient({ members }: { members: Member[] }) {
       {message && (
         <div
           className={`rounded-md p-3 text-sm ${
-            message.startsWith("Error")
+            messageType === "error"
               ? "bg-red-50 text-red-700"
               : "bg-green-50 text-green-700"
           }`}
@@ -311,20 +350,20 @@ export function MembersClient({ members }: { members: Member[] }) {
             size="sm"
             onClick={() => setFilter("active")}
           >
-            Active ({members.filter((m) => !m.archived).length})
+            Active ({activeCount})
           </Button>
           <Button
             variant={filter === "archived" ? "default" : "outline"}
             size="sm"
             onClick={() => setFilter("archived")}
           >
-            Archived ({members.filter((m) => m.archived).length})
+            Archived ({archivedCount})
           </Button>
         </div>
         <div className="flex gap-2">
           <Select value={filterTeam} onValueChange={(v) => setFilterTeam(v as TeamType | "all")}>
             <SelectTrigger className="w-[140px]">
-              <SelectValue>{(value) => value === "all" ? "All Teams" : value}</SelectValue>
+              <SelectValue placeholder="All Teams" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Teams</SelectItem>
@@ -335,7 +374,7 @@ export function MembersClient({ members }: { members: Member[] }) {
           </Select>
           <Select value={filterLevel} onValueChange={(v) => setFilterLevel(v as LevelType | "all")}>
             <SelectTrigger className="w-[120px]">
-              <SelectValue>{(value) => value === "all" ? "All Levels" : value}</SelectValue>
+              <SelectValue placeholder="All Levels" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Levels</SelectItem>
@@ -346,9 +385,7 @@ export function MembersClient({ members }: { members: Member[] }) {
           </Select>
           <Select value={filterDivision} onValueChange={(v) => setFilterDivision(v as DivisionType | "all")}>
             <SelectTrigger className="w-[160px]">
-              <SelectValue>
-                {(value) => value === "all" ? "All Divisions" : DIVISION_LABELS[value as DivisionType]}
-              </SelectValue>
+              <SelectValue placeholder="All Divisions" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Divisions</SelectItem>
@@ -390,9 +427,7 @@ export function MembersClient({ members }: { members: Member[] }) {
                   <TableCell>{member.login_id}</TableCell>
                   <TableCell>{member.email}</TableCell>
                   <TableCell>
-                    <Badge variant="secondary">
-                      {TEAM_LABELS[member.team] || member.team}
-                    </Badge>
+                    <Badge variant="secondary">{member.team}</Badge>
                   </TableCell>
                   <TableCell>{member.level}</TableCell>
                   <TableCell>
@@ -406,7 +441,7 @@ export function MembersClient({ members }: { members: Member[] }) {
                         variant="ghost"
                         size="sm"
                         className="text-red-600 hover:text-red-700"
-                        onClick={() => handleArchive(member.id)}
+                        onClick={() => setArchiveTarget(member)}
                       >
                         Archive
                       </Button>
@@ -418,6 +453,33 @@ export function MembersClient({ members }: { members: Member[] }) {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={!!archiveTarget} onOpenChange={(open) => !open && setArchiveTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Archive Member</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to archive &apos;{archiveTarget?.name}&apos;? They will no longer appear in active members.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setArchiveTarget(null)}
+              disabled={archiving}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleArchiveConfirm}
+              disabled={archiving}
+            >
+              {archiving ? "Archiving..." : "Archive"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

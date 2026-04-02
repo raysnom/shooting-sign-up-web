@@ -73,7 +73,7 @@ export default async function DraftReviewPage({
     .order("day", { ascending: true })
     .order("time_start", { ascending: true });
 
-  const typedSessions = (sessions as Session[]) || [];
+  const typedSessions = (sessions as Session[]) ?? [];
 
   // Fetch all allocations for this week, joined with member names
   const { data: allocations } = await supabase
@@ -83,7 +83,7 @@ export default async function DraftReviewPage({
     .eq("cancelled", false)
     .order("priority_score", { ascending: false });
 
-  const typedAllocations: AllocationWithDetails[] = (allocations || []).map(
+  const typedAllocations: AllocationWithDetails[] = (allocations ?? []).map(
     (a: Record<string, unknown>) => {
       const members = a.members as { name: string } | null;
       const sessionsJoin = a.sessions as {
@@ -119,7 +119,7 @@ export default async function DraftReviewPage({
     .select("*, members(name), sessions(name, day)")
     .eq("week_id", weekId);
 
-  const typedExcoDuties: ExcoDutyWithDetails[] = (excoDuties || []).map(
+  const typedExcoDuties: ExcoDutyWithDetails[] = (excoDuties ?? []).map(
     (e: Record<string, unknown>) => {
       const members = e.members as { name: string } | null;
       const sessionsJoin = e.sessions as { name: string; day: DayType } | null;

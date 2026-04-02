@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { Gun, GunTypeEnum, Member } from "@/types/database";
 import { TEAM_LABELS } from "@/lib/constants";
 import {
@@ -86,18 +86,47 @@ export function GunsClient({
   // Derived data
   // ──────────────────────────────────────────────
 
-  function getAssignedMembers(gunId: string) {
+  const getAssignedMembers = useCallback((gunId: string) => {
     return members.filter((m) => m.gun_id === gunId);
-  }
+  }, [members]);
 
-  function getGunName(gunId: string | null) {
+  const getGunName = useCallback((gunId: string | null) => {
     if (!gunId) return null;
     const gun = guns.find((g) => g.id === gunId);
     return gun ? `${gun.name} (${GUN_TYPE_LABELS[gun.type]})` : null;
-  }
+  }, [guns]);
+
+  const pistolGuns = useMemo(() => guns.filter((g) => g.type === "air_pistol"), [guns]);
+  const rifleGuns = useMemo(() => guns.filter((g) => g.type === "air_rifle"), [guns]);
 
   // ──────────────────────────────────────────────
-  // Gun CRUD handlers
+  // Callbacks
+  // ──────────────────────────────────────────────
+
+  const openEditGun = useCallback((gun: Gun) => {
+    setEditingGun(gun);
+    setEditForm({ name: gun.name, type: gun.type });
+    setShowEdit(true);
+  }, []);
+
+  const handleDeleteGunClick = useCallback(async (id: string) => {
+    if (!confirm("Are you sure you want to delete this gun?")) return;
+    setLoading(true);
+    setMessage(null);
+
+    const result = await deleteGun(id);
+
+    setLoading(false);
+
+    if (result.error) {
+      setMessage(`Error: ${result.error}`);
+    } else {
+      setMessage("Gun deleted.");
+    }
+  }, []);
+
+  // ──────────────────────────────────────────────
+  // Server actions
   // ──────────────────────────────────────────────
 
   async function handleCreateGun(e: React.FormEvent) {
@@ -111,6 +140,8 @@ export function GunsClient({
       type: addForm.type,
     });
 
+    setLoading(false);
+
     if (result.error) {
       setMessage(`Error: ${result.error}`);
     } else {
@@ -118,13 +149,6 @@ export function GunsClient({
       setAddForm({ name: "", type: "air_pistol" });
       setShowAdd(false);
     }
-    setLoading(false);
-  }
-
-  function openEditGun(gun: Gun) {
-    setEditingGun(gun);
-    setEditForm({ name: gun.name, type: gun.type });
-    setShowEdit(true);
   }
 
   async function handleUpdateGun(e: React.FormEvent) {
@@ -138,6 +162,8 @@ export function GunsClient({
       type: editForm.type,
     });
 
+    setLoading(false);
+
     if (result.error) {
       setMessage(`Error: ${result.error}`);
     } else {
@@ -145,22 +171,6 @@ export function GunsClient({
       setShowEdit(false);
       setEditingGun(null);
     }
-    setLoading(false);
-  }
-
-  async function handleDeleteGun(id: string) {
-    if (!confirm("Are you sure you want to delete this gun?")) return;
-    setLoading(true);
-    setMessage(null);
-
-    const result = await deleteGun(id);
-
-    if (result.error) {
-      setMessage(`Error: ${result.error}`);
-    } else {
-      setMessage("Gun deleted.");
-    }
-    setLoading(false);
   }
 
   // ──────────────────────────────────────────────
@@ -202,33 +212,36 @@ export function GunsClient({
 
   async function handleAssign(memberId: string, value: string) {
     const gunId = value === UNASSIGN_VALUE ? null : value;
+
+    // Skip if the value hasn't changed
+    const member = members.find((m) => m.id === memberId);
+    if (member && (member.gun_id ?? null) === gunId) return;
+
     setLoading(true);
     setMessage(null);
 
     const result = await assignGunToMember(memberId, gunId);
+
+    setLoading(false);
 
     if (result.error) {
       setMessage(`Error: ${result.error}`);
     } else {
       setMessage("Gun assignment updated.");
     }
-    setLoading(false);
   }
 
   // ──────────────────────────────────────────────
-  // Group guns by type for the assignment select
+  // Render helpers
   // ──────────────────────────────────────────────
 
-  const pistolGuns = guns.filter((g) => g.type === "air_pistol");
-  const rifleGuns = guns.filter((g) => g.type === "air_rifle");
-
-  function renderGunSelect(member: Member) {
+  const renderGunSelect = useCallback((member: Member) => {
     const currentValue = member.gun_id || UNASSIGN_VALUE;
 
     return (
       <Select
         value={currentValue}
-        onValueChange={(v) => handleAssign(member.id, v ?? "__unassign__")}
+        onValueChange={(v) => v && handleAssign(member.id, v)}
         disabled={loading}
       >
         <SelectTrigger className="w-[220px]">
@@ -265,7 +278,7 @@ export function GunsClient({
         </SelectContent>
       </Select>
     );
-  }
+  }, [guns, handleAssign, loading, pistolGuns, rifleGuns]);
 
   return (
     <div className="space-y-6">
@@ -381,19 +394,17 @@ export function GunsClient({
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {(() => {
-                            const assigned = getAssignedMembers(gun.id);
-                            if (assigned.length === 0) return <span className="text-muted-foreground">None</span>;
-                            return (
-                              <div className="flex flex-wrap gap-1">
-                                {assigned.map((m) => (
-                                  <Badge key={m.id} variant="outline" className="text-xs">
-                                    {m.name}
-                                  </Badge>
-                                ))}
-                              </div>
-                            );
-                          })()}
+                          {getAssignedMembers(gun.id).length === 0 ? (
+                            <span className="text-muted-foreground">None</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {getAssignedMembers(gun.id).map((m) => (
+                                <Badge key={m.id} variant="outline" className="text-xs">
+                                  {m.name}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
@@ -409,7 +420,7 @@ export function GunsClient({
                               variant="ghost"
                               size="sm"
                               className="text-red-600 hover:text-red-700"
-                              onClick={() => handleDeleteGun(gun.id)}
+                              onClick={() => handleDeleteGunClick(gun.id)}
                               disabled={loading}
                             >
                               Delete

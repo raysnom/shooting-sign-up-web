@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useMemo, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { RoleType } from "@/types/database";
 import { Button } from "@/components/ui/button";
@@ -43,17 +44,20 @@ export function Sidebar({
   const router = useRouter();
   const supabase = createClient();
 
-  const visibleItems = navItems.filter((item) => item.roles.includes(role));
+  // Memoize filtered navigation items
+  const { memberItems, adminItems } = useMemo(() => {
+    const visibleItems = navItems.filter((item) => item.roles.includes(role));
+    return {
+      memberItems: visibleItems.filter((item) => !item.admin),
+      adminItems: visibleItems.filter((item) => item.admin),
+    };
+  }, [role]);
 
-  // Group items: member items first, then admin items
-  const memberItems = visibleItems.filter((item) => !item.admin);
-  const adminItems = visibleItems.filter((item) => item.admin);
-
-  async function handleLogout() {
+  const handleLogout = useCallback(async () => {
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
-  }
+  }, [supabase, router]);
 
   return (
     <aside className="flex h-screen w-64 flex-col border-r bg-white">

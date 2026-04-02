@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { WeekStatus } from "@/types/database";
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -16,13 +17,15 @@ async function verifyPresident() {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Not authenticated", userId: null };
 
-  const { data: caller } = await supabase
+  const { data: member } = await supabase
     .from("members")
     .select("role")
     .eq("id", user.id)
     .single();
 
-  if (caller?.role !== "president") return { error: "Not authorized", userId: null };
+  if (member?.role !== "president") {
+    return { error: "Only the President can perform this action.", userId: null };
+  }
   return { error: null, userId: user.id };
 }
 
@@ -40,25 +43,20 @@ type CreateWeekInput = {
 export async function createWeek(input: CreateWeekInput) {
   const { error: authError, userId } = await verifyPresident();
   if (authError || !userId) return { error: authError };
+  if (!isValidUUID(input.semester_id)) return { error: "Invalid semester ID." };
 
   // Auto-calculate submission deadline: Saturday at 5 PM of that week.
   // end_date is the Sunday, so Saturday = end_date - 1 day.
-  const endDate = new Date(input.end_date + "T00:00:00");
-  const saturday = new Date(endDate);
+  const saturday = new Date(input.end_date + "T00:00:00");
   saturday.setDate(saturday.getDate() - 1);
 
-  // Format as ISO timestamptz: YYYY-MM-DDT17:00:00+08:00 (Singapore time)
-  const year = saturday.getFullYear();
-  const month = String(saturday.getMonth() + 1).padStart(2, "0");
-  const day = String(saturday.getDate()).padStart(2, "0");
-  const submissionDeadline = `${year}-${month}-${day}T17:00:00+08:00`;
+  const submissionDeadline = `${saturday.toISOString().split("T")[0]}T17:00:00+08:00`;
 
   const admin = createAdminClient();
 
-  // Parse max_live_per_member (empty string -> null)
-  const maxLivePerMember = input.max_live_per_member.trim() === ""
-    ? null
-    : parseInt(input.max_live_per_member, 10);
+  const maxLivePerMember = input.max_live_per_member.trim()
+    ? parseInt(input.max_live_per_member, 10)
+    : null;
 
   const { error } = await admin.from("weeks").insert({
     semester_id: input.semester_id,
@@ -70,7 +68,7 @@ export async function createWeek(input: CreateWeekInput) {
     max_live_per_member: maxLivePerMember,
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
   return { success: true };
@@ -83,6 +81,7 @@ export async function createWeek(input: CreateWeekInput) {
 export async function generateSessionsFromTemplates(weekId: string) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
+  if (!isValidUUID(weekId)) return { error: "Invalid week ID." };
 
   const admin = createAdminClient();
 
@@ -91,7 +90,7 @@ export async function generateSessionsFromTemplates(weekId: string) {
     .from("session_templates")
     .select("*");
 
-  if (fetchError) return { error: fetchError.message };
+  if (fetchError) return { error: sanitizeDbError(fetchError) };
   if (!templates || templates.length === 0) {
     return { error: "No session templates found. Create templates first." };
   }
@@ -111,7 +110,7 @@ export async function generateSessionsFromTemplates(weekId: string) {
 
   const { error } = await admin.from("sessions").insert(sessions);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
   return { success: true, count: sessions.length };
@@ -133,6 +132,7 @@ type UpdateSessionInput = Partial<{
 export async function updateSession(sessionId: string, updates: UpdateSessionInput) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
+  if (!isValidUUID(sessionId)) return { error: "Invalid session ID." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -140,7 +140,7 @@ export async function updateSession(sessionId: string, updates: UpdateSessionInp
     .update(updates)
     .eq("id", sessionId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
   return { success: true };
@@ -153,6 +153,7 @@ export async function updateSession(sessionId: string, updates: UpdateSessionInp
 export async function cancelSession(sessionId: string) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
+  if (!isValidUUID(sessionId)) return { error: "Invalid session ID." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -160,7 +161,7 @@ export async function cancelSession(sessionId: string) {
     .update({ is_cancelled: true })
     .eq("id", sessionId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
   return { success: true };
@@ -173,6 +174,7 @@ export async function cancelSession(sessionId: string) {
 export async function uncancelSession(sessionId: string) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
+  if (!isValidUUID(sessionId)) return { error: "Invalid session ID." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -180,7 +182,7 @@ export async function uncancelSession(sessionId: string) {
     .update({ is_cancelled: false })
     .eq("id", sessionId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
   return { success: true };
@@ -193,6 +195,7 @@ export async function uncancelSession(sessionId: string) {
 export async function deleteWeek(weekId: string) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
+  if (!isValidUUID(weekId)) return { error: "Invalid week ID." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -200,7 +203,7 @@ export async function deleteWeek(weekId: string) {
     .delete()
     .eq("id", weekId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
   return { success: true };
@@ -213,6 +216,7 @@ export async function deleteWeek(weekId: string) {
 export async function updateWeekStatus(weekId: string, status: WeekStatus) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
+  if (!isValidUUID(weekId)) return { error: "Invalid week ID." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -220,7 +224,7 @@ export async function updateWeekStatus(weekId: string, status: WeekStatus) {
     .update({ status })
     .eq("id", weekId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
   return { success: true };

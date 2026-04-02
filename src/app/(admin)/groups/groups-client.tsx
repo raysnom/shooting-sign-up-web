@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import type {
   CompetitionGroup,
   CompetitionGroupMember,
@@ -51,11 +51,28 @@ export function GroupsClient({
   const [newGroupName, setNewGroupName] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageType, setMessageType] = useState<"error" | "success">("success");
   const [addMemberGroupId, setAddMemberGroupId] = useState<string | null>(null);
   const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(new Set());
   const [memberSearch, setMemberSearch] = useState("");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<CompetitionGroup | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<{id: string; name: string} | null>(null);
+  const [addProgress, setAddProgress] = useState<{current: number; total: number} | null>(null);
 
-  async function handleCreateGroup(e: React.FormEvent) {
+  const toggleGroupCollapse = useCallback((groupId: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) {
+        next.delete(groupId);
+      } else {
+        next.add(groupId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleCreateGroup = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
@@ -63,37 +80,37 @@ export function GroupsClient({
     const result = await createGroup(newGroupName);
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
+      setMessageType("success");
       setMessage("Group created successfully.");
       setNewGroupName("");
       setShowCreate(false);
+      setTimeout(() => setMessage(null), 5000);
     }
     setLoading(false);
-  }
+  }, [newGroupName]);
 
-  async function handleDeleteGroup(id: string, name: string) {
-    if (
-      !confirm(
-        `Are you sure you want to delete the group "${name}"? All members will be removed from this group.`
-      )
-    )
-      return;
-
+  const handleDeleteGroup = useCallback(async (id: string) => {
     setLoading(true);
     setMessage(null);
 
     const result = await deleteGroup(id);
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
+      setMessageType("success");
       setMessage("Group deleted successfully.");
+      setTimeout(() => setMessage(null), 5000);
     }
     setLoading(false);
-  }
+    setDeleteTarget(null);
+  }, []);
 
-  function toggleMemberSelection(memberId: string) {
+  const toggleMemberSelection = useCallback((memberId: string) => {
     setSelectedMemberIds((prev) => {
       const next = new Set(prev);
       if (next.has(memberId)) {
@@ -103,63 +120,73 @@ export function GroupsClient({
       }
       return next;
     });
-  }
+  }, []);
 
-  async function handleAddMembers(e: React.FormEvent) {
+  const handleAddMembers = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!addMemberGroupId || selectedMemberIds.size === 0) return;
 
     setLoading(true);
     setMessage(null);
+    setAddProgress({current: 0, total: selectedMemberIds.size});
+
+    const memberMap = new Map(allMembers.map((m) => [m.id, m.name]));
 
     let added = 0;
-    let errors: string[] = [];
+    const errors: string[] = [];
     for (const memberId of selectedMemberIds) {
       const result = await addGroupMember(addMemberGroupId, memberId);
       if (result.error) {
-        const name = allMembers.find((m) => m.id === memberId)?.name || memberId;
+        const name = memberMap.get(memberId) || memberId;
         errors.push(`${name}: ${result.error}`);
       } else {
         added++;
       }
+      setAddProgress(prev => prev ? {...prev, current: prev.current + 1} : null);
     }
 
     if (errors.length > 0) {
+      setMessageType("error");
       setMessage(`Added ${added} member(s). Errors: ${errors.join("; ")}`);
     } else {
+      setMessageType("success");
       setMessage(`${added} member(s) added to group.`);
+      setTimeout(() => setMessage(null), 5000);
     }
     setSelectedMemberIds(new Set());
     setAddMemberGroupId(null);
+    setAddProgress(null);
     setLoading(false);
-  }
+  }, [addMemberGroupId, selectedMemberIds, allMembers]);
 
-  async function handleRemoveMember(id: string) {
-    if (!confirm("Remove this member from the group?")) return;
-
+  const handleRemoveMember = useCallback(async (id: string) => {
     setLoading(true);
     setMessage(null);
 
     const result = await removeGroupMember(id);
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
+      setMessageType("success");
       setMessage("Member removed from group.");
+      setTimeout(() => setMessage(null), 5000);
     }
     setLoading(false);
-  }
+    setRemoveTarget(null);
+  }, []);
 
-  function getMembersForGroup(groupId: string) {
+  const getMembersForGroup = useCallback((groupId: string) => {
     return groupMembers.filter((gm) => gm.group_id === groupId);
-  }
+  }, [groupMembers]);
 
-  function getAvailableMembers(groupId: string) {
+  const getAvailableMembers = useCallback((groupId: string) => {
     const existingMemberIds = new Set(
-      getMembersForGroup(groupId).map((gm) => gm.member_id)
+      groupMembers.filter((gm) => gm.group_id === groupId).map((gm) => gm.member_id)
     );
     return allMembers.filter((m) => !existingMemberIds.has(m.id));
-  }
+  }, [groupMembers, allMembers]);
 
   return (
     <div className="space-y-6">
@@ -199,7 +226,7 @@ export function GroupsClient({
       {message && (
         <div
           className={`rounded-md p-3 text-sm ${
-            message.startsWith("Error")
+            messageType === "error"
               ? "bg-red-50 text-red-700"
               : "bg-green-50 text-green-700"
           }`}
@@ -227,13 +254,28 @@ export function GroupsClient({
             return (
               <div key={group.id} className="rounded-md border bg-white">
                 <div className="flex items-center justify-between border-b px-4 py-3">
-                  <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="flex items-center gap-3 text-left"
+                    onClick={() => toggleGroupCollapse(group.id)}
+                  >
+                    <svg
+                      className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                        collapsedGroups.has(group.id) ? "" : "rotate-90"
+                      }`}
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
                     <h2 className="text-lg font-semibold">{group.name}</h2>
                     <Badge variant="secondary">
                       {members.length}{" "}
                       {members.length === 1 ? "member" : "members"}
                     </Badge>
-                  </div>
+                  </button>
                   <div className="flex items-center gap-2">
                     <Dialog
                       open={addMemberGroupId === group.id}
@@ -280,11 +322,21 @@ export function GroupsClient({
                                   </p>
                                 )}
                                 <div className="max-h-64 overflow-y-auto rounded-md border">
-                                  {available
-                                    .filter((m) =>
-                                      m.name.toLowerCase().includes(memberSearch.toLowerCase())
-                                    )
-                                    .map((m) => (
+                                  {(() => {
+                                    const searchLower = memberSearch.toLowerCase();
+                                    const filtered = available.filter((m) =>
+                                      m.name.toLowerCase().includes(searchLower)
+                                    );
+
+                                    if (filtered.length === 0) {
+                                      return (
+                                        <div className="px-3 py-2 text-sm text-gray-500">
+                                          No members found
+                                        </div>
+                                      );
+                                    }
+
+                                    return filtered.map((m) => (
                                       <label
                                         key={m.id}
                                         className="flex cursor-pointer items-center gap-3 border-b px-3 py-2 last:border-b-0 hover:bg-muted/50"
@@ -300,14 +352,8 @@ export function GroupsClient({
                                           {TEAM_LABELS[m.team] || m.team} ({m.level})
                                         </span>
                                       </label>
-                                    ))}
-                                  {available.filter((m) =>
-                                    m.name.toLowerCase().includes(memberSearch.toLowerCase())
-                                  ).length === 0 && (
-                                    <div className="px-3 py-2 text-sm text-gray-500">
-                                      No members found
-                                    </div>
-                                  )}
+                                    ));
+                                  })()}
                                 </div>
                               </>
                             )}
@@ -321,7 +367,9 @@ export function GroupsClient({
                               available.length === 0
                             }
                           >
-                            {loading ? "Adding..." : `Add ${selectedMemberIds.size || ""} Member${selectedMemberIds.size !== 1 ? "s" : ""}`}
+                            {addProgress
+                              ? `Adding ${addProgress.current}/${addProgress.total}...`
+                              : `Add ${selectedMemberIds.size} Member${selectedMemberIds.size === 1 ? "" : "s"}`}
                           </Button>
                         </form>
                       </DialogContent>
@@ -330,7 +378,7 @@ export function GroupsClient({
                       variant="ghost"
                       size="sm"
                       className="text-red-600 hover:text-red-700"
-                      onClick={() => handleDeleteGroup(group.id, group.name)}
+                      onClick={() => setDeleteTarget(group)}
                       disabled={loading}
                     >
                       Delete Group
@@ -338,51 +386,109 @@ export function GroupsClient({
                   </div>
                 </div>
 
-                {members.length === 0 ? (
-                  <div className="p-4 text-center text-sm text-gray-500">
-                    No members in this group yet.
-                  </div>
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Team</TableHead>
-                        <TableHead>Level</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {members.map((gm) => (
-                        <TableRow key={gm.id}>
-                          <TableCell className="font-medium">
-                            {gm.member.name}
-                          </TableCell>
-                          <TableCell>
-                            {TEAM_LABELS[gm.member.team] || gm.member.team}
-                          </TableCell>
-                          <TableCell>{gm.member.level}</TableCell>
-                          <TableCell className="text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-600 hover:text-red-700"
-                              onClick={() => handleRemoveMember(gm.id)}
-                              disabled={loading}
-                            >
-                              Remove
-                            </Button>
-                          </TableCell>
+                {!collapsedGroups.has(group.id) && (
+                  members.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-gray-500">
+                      No members in this group yet.
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Team</TableHead>
+                          <TableHead>Level</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      </TableHeader>
+                      <TableBody>
+                        {members.map((gm) => (
+                          <TableRow key={gm.id}>
+                            <TableCell className="font-medium">
+                              {gm.member.name}
+                            </TableCell>
+                            <TableCell>
+                              {TEAM_LABELS[gm.member.team] || gm.member.team}
+                            </TableCell>
+                            <TableCell>{gm.member.level}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-600 hover:text-red-700"
+                                onClick={() => setRemoveTarget({id: gm.id, name: gm.member.name})}
+                                disabled={loading}
+                              >
+                                Remove
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )
                 )}
               </div>
             );
           })}
         </div>
       )}
+
+      {/* Delete Group Confirmation Dialog */}
+      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Group</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the group &quot;{deleteTarget?.name}&quot;? All members will be removed from this group.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteTarget && handleDeleteGroup(deleteTarget.id)}
+              disabled={loading}
+            >
+              {loading ? "Deleting..." : "Delete Group"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove Member Confirmation Dialog */}
+      <Dialog open={removeTarget !== null} onOpenChange={(open) => !open && setRemoveTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Member</DialogTitle>
+            <DialogDescription>
+              Remove &quot;{removeTarget?.name}&quot; from this group?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setRemoveTarget(null)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => removeTarget && handleRemoveMember(removeTarget.id)}
+              disabled={loading}
+            >
+              {loading ? "Removing..." : "Remove Member"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

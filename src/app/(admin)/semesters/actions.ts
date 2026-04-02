@@ -3,12 +3,16 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
+import { logAudit } from "@/lib/utils/audit";
 
 // ──────────────────────────────────────────────
 // Auth helper
 // ──────────────────────────────────────────────
 
-async function verifyPresident() {
+async function verifyPresident(): Promise<
+  { error: string; userId: null } | { error: null; userId: string }
+> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -36,8 +40,9 @@ type CreateSemesterInput = {
 };
 
 export async function createSemester(input: CreateSemesterInput) {
-  const { error: authError, userId } = await verifyPresident();
-  if (authError || !userId) return { error: authError };
+  const authResult = await verifyPresident();
+  if (authResult.error !== null) return { error: authResult.error };
+  const userId = authResult.userId;
 
   const admin = createAdminClient();
   const { error } = await admin.from("semesters").insert({
@@ -47,7 +52,9 @@ export async function createSemester(input: CreateSemesterInput) {
     created_by: userId,
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
+
+  await logAudit("semester.create", userId, undefined, { name: input.name });
 
   revalidatePath("/semesters");
   return { success: true };
@@ -58,8 +65,11 @@ export async function createSemester(input: CreateSemesterInput) {
 // ──────────────────────────────────────────────
 
 export async function deleteSemester(id: string) {
-  const { error: authError } = await verifyPresident();
-  if (authError) return { error: authError };
+  const authResult = await verifyPresident();
+  if (authResult.error !== null) return { error: authResult.error };
+  const userId = authResult.userId;
+
+  if (!isValidUUID(id)) return { error: "Invalid semester ID." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -67,7 +77,9 @@ export async function deleteSemester(id: string) {
     .delete()
     .eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
+
+  await logAudit("semester.delete", userId, id);
 
   revalidatePath("/semesters");
   return { success: true };
@@ -78,8 +90,9 @@ export async function deleteSemester(id: string) {
 // ──────────────────────────────────────────────
 
 export async function resetNoShowCounts() {
-  const { error: authError } = await verifyPresident();
-  if (authError) return { error: authError };
+  const authResult = await verifyPresident();
+  if (authResult.error !== null) return { error: authResult.error };
+  const userId = authResult.userId;
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -87,7 +100,9 @@ export async function resetNoShowCounts() {
     .update({ no_show_count: 0 })
     .eq("archived", false);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
+
+  await logAudit("no_show.reset", userId);
 
   revalidatePath("/semesters");
   return { success: true };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type {
   Week,
   TrainingRequirement,
@@ -45,7 +45,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+// ──────────────────────────────────────────────
+// Constants
+// ──────────────────────────────────────────────
+
 const teams: TeamType[] = ["APW", "APM", "ARM", "ARW"];
+
+const TARGET_TYPE_LABELS: Record<TrainingTargetType, string> = {
+  team: "Team",
+  individual: "Individual",
+  division: "Division",
+  group: "Group",
+};
+
+// ──────────────────────────────────────────────
+// Helper functions
+// ──────────────────────────────────────────────
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("en-SG", {
@@ -110,9 +125,47 @@ export function RequirementsClient({
 
   const [editMinSessions, setEditMinSessions] = useState(1);
 
-  const filteredRequirements = requirements.filter(
-    (r) => r.week_id === selectedWeekId
+  // ──────────────────────────────────────────────
+  // Memoized values
+  // ──────────────────────────────────────────────
+
+  const filteredRequirements = useMemo(
+    () => requirements.filter((r) => r.week_id === selectedWeekId),
+    [requirements, selectedWeekId]
   );
+
+  const selectedWeek = useMemo(
+    () => weeks.find((w) => w.id === selectedWeekId),
+    [weeks, selectedWeekId]
+  );
+
+  // ──────────────────────────────────────────────
+  // Callbacks
+  // ──────────────────────────────────────────────
+
+  const handleTargetTypeChange = useCallback((value: TrainingTargetType) => {
+    setForm((prev) => ({ ...prev, target_type: value, target_value: "" }));
+  }, []);
+
+  const handleTargetValueChange = useCallback((value: string | null) => {
+    if (!value) return;
+    setForm((prev) => ({ ...prev, target_value: value ?? "" }));
+  }, []);
+
+  const handleMinSessionsChange = useCallback((value: string) => {
+    const parsed = parseInt(value, 10);
+    setForm((prev) => ({ ...prev, min_sessions: isNaN(parsed) ? 1 : parsed }));
+  }, []);
+
+  const openEdit = useCallback((req: TrainingRequirement) => {
+    setEditingReq(req);
+    setEditMinSessions(req.min_sessions);
+    setShowEdit(true);
+  }, []);
+
+  // ──────────────────────────────────────────────
+  // Server actions
+  // ──────────────────────────────────────────────
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -173,22 +226,16 @@ export function RequirementsClient({
     setLoading(false);
   }
 
-  function openEdit(req: TrainingRequirement) {
-    setEditingReq(req);
-    setEditMinSessions(req.min_sessions);
-    setShowEdit(true);
-  }
-
-  function handleTargetTypeChange(value: TrainingTargetType) {
-    setForm({ ...form, target_type: value, target_value: "" });
-  }
+  // ──────────────────────────────────────────────
+  // Render helpers
+  // ──────────────────────────────────────────────
 
   function renderTargetValueSelect() {
     if (form.target_type === "team") {
       return (
         <Select
           value={form.target_value}
-          onValueChange={(v) => setForm({ ...form, target_value: v ?? "" })}
+          onValueChange={handleTargetValueChange}
         >
           <SelectTrigger>
             <SelectValue placeholder="Select a team">
@@ -210,7 +257,7 @@ export function RequirementsClient({
       return (
         <Select
           value={form.target_value}
-          onValueChange={(v) => setForm({ ...form, target_value: v ?? "" })}
+          onValueChange={handleTargetValueChange}
         >
           <SelectTrigger>
             <SelectValue placeholder="Select a division">
@@ -232,7 +279,7 @@ export function RequirementsClient({
       return (
         <Select
           value={form.target_value}
-          onValueChange={(v) => setForm({ ...form, target_value: v ?? "" })}
+          onValueChange={handleTargetValueChange}
         >
           <SelectTrigger>
             <SelectValue placeholder="Select a group">
@@ -263,7 +310,7 @@ export function RequirementsClient({
     return (
       <Select
         value={form.target_value}
-        onValueChange={(v) => setForm({ ...form, target_value: v ?? "" })}
+        onValueChange={handleTargetValueChange}
       >
         <SelectTrigger>
           <SelectValue placeholder="Select a member">
@@ -309,11 +356,7 @@ export function RequirementsClient({
               <div className="space-y-2">
                 <Label>Week</Label>
                 <p className="text-sm text-muted-foreground">
-                  {weeks.find((w) => w.id === selectedWeekId)
-                    ? getWeekLabel(
-                        weeks.find((w) => w.id === selectedWeekId)!
-                      )
-                    : "No week selected"}
+                  {selectedWeek ? getWeekLabel(selectedWeek) : "No week selected"}
                 </p>
               </div>
               <div className="space-y-2">
@@ -326,10 +369,7 @@ export function RequirementsClient({
                 >
                   <SelectTrigger>
                     <SelectValue>
-                      {(value) => {
-                        const labels: Record<string, string> = { team: "Team", individual: "Individual", division: "Division", group: "Group" };
-                        return labels[value] || value;
-                      }}
+                      {(value) => TARGET_TYPE_LABELS[value as TrainingTargetType] || value}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -358,12 +398,7 @@ export function RequirementsClient({
                   type="number"
                   min={1}
                   value={form.min_sessions}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      min_sessions: parseInt(e.target.value) || 1,
-                    })
-                  }
+                  onChange={(e) => handleMinSessionsChange(e.target.value)}
                 />
               </div>
               <Button
@@ -418,9 +453,9 @@ export function RequirementsClient({
       </div>
 
       <div className="rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
-        Requirements can be set per team, individual, division, or competition
-        group. Individual overrides have higher priority during competition
-        season.
+        Requirements can be set per team, division, competition group, or
+        individual. Priority order (highest to lowest): Individual &gt; Group
+        &gt; Division &gt; Team.
       </div>
 
       <Separator />

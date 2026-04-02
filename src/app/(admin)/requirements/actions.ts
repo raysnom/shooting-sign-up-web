@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { TrainingTargetType } from "@/types/database";
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -41,6 +42,12 @@ export async function createRequirement(input: CreateRequirementInput) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
 
+  if (!isValidUUID(input.week_id)) return { error: "Invalid week ID." };
+
+  if (input.target_type === "individual" || input.target_type === "group") {
+    if (!isValidUUID(input.target_value)) return { error: "Invalid target value." };
+  }
+
   const admin = createAdminClient();
   const { error } = await admin.from("training_requirements").insert({
     week_id: input.week_id,
@@ -49,7 +56,7 @@ export async function createRequirement(input: CreateRequirementInput) {
     min_sessions: input.min_sessions,
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/requirements");
   return { success: true };
@@ -66,13 +73,15 @@ export async function updateRequirement(
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
 
+  if (!isValidUUID(id)) return { error: "Invalid requirement ID." };
+
   const admin = createAdminClient();
   const { error } = await admin
     .from("training_requirements")
     .update({ min_sessions: data.min_sessions })
     .eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/requirements");
   return { success: true };
@@ -86,13 +95,15 @@ export async function deleteRequirement(id: string) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
 
+  if (!isValidUUID(id)) return { error: "Invalid requirement ID." };
+
   const admin = createAdminClient();
   const { error } = await admin
     .from("training_requirements")
     .delete()
     .eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/requirements");
   return { success: true };

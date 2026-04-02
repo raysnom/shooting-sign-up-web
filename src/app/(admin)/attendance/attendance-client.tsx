@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import Link from "next/link";
 import type {
   Week,
@@ -123,6 +123,7 @@ export function AttendanceClient({
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageType, setMessageType] = useState<"error" | "success">("success");
 
   // VR dialog state
   const [vrDialogOpen, setVrDialogOpen] = useState(false);
@@ -135,127 +136,160 @@ export function AttendanceClient({
   const [newEventDate, setNewEventDate] = useState("");
   const [eventLoading, setEventLoading] = useState(false);
 
+  // Special event delete confirmation state
+  const [deleteEventTarget, setDeleteEventTarget] = useState<SpecialEvent | null>(null);
+
+  // Special event checkbox loading state
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
   // Special event member search filter
   const [eventMemberSearch, setEventMemberSearch] = useState<
     Record<string, string>
   >({});
 
+  // Build a map of attendance records keyed by member_id + session_id + week_id
+  const attendanceMap = useMemo(() => {
+    const map = new Map<string, Attendance>();
+    for (const record of attendanceRecords) {
+      const key = `${record.member_id}_${record.session_id}_${record.week_id}`;
+      map.set(key, record);
+    }
+    return map;
+  }, [attendanceRecords]);
+
+  const getAttendance = useCallback(
+    (memberId: string, sessionId: string, weekId: string): Attendance | undefined => {
+      return attendanceMap.get(`${memberId}_${sessionId}_${weekId}`);
+    },
+    [attendanceMap]
+  );
+
   // Filter sessions for the selected week
-  const weekSessions = sessions.filter((s) => s.week_id === selectedWeekId);
+  const weekSessions = useMemo(
+    () => sessions.filter((s) => s.week_id === selectedWeekId),
+    [sessions, selectedWeekId]
+  );
 
   // Group sessions by day for the select dropdown
-  const sessionsByDay = DAY_ORDER.reduce<Record<string, Session[]>>(
-    (acc, day) => {
-      const daySessions = weekSessions.filter((s) => s.day === day);
-      if (daySessions.length > 0) {
-        acc[day] = daySessions;
-      }
-      return acc;
-    },
-    {}
+  const sessionsByDay = useMemo(
+    () =>
+      DAY_ORDER.reduce<Record<string, Session[]>>((acc, day) => {
+        const daySessions = weekSessions.filter((s) => s.day === day);
+        if (daySessions.length > 0) {
+          acc[day] = daySessions;
+        }
+        return acc;
+      }, {}),
+    [weekSessions]
   );
 
   // Filter allocations for the selected session and week
-  const sessionAllocations = allocations.filter(
-    (a) => a.session_id === selectedSessionId && a.week_id === selectedWeekId
+  const sessionAllocations = useMemo(
+    () =>
+      allocations.filter(
+        (a) => a.session_id === selectedSessionId && a.week_id === selectedWeekId
+      ),
+    [allocations, selectedSessionId, selectedWeekId]
   );
 
-  // Build a map of attendance records keyed by member_id + session_id + week_id
-  const attendanceMap = new Map<string, Attendance>();
-  for (const record of attendanceRecords) {
-    const key = `${record.member_id}_${record.session_id}_${record.week_id}`;
-    attendanceMap.set(key, record);
-  }
-
-  function getAttendance(
-    memberId: string,
-    sessionId: string,
-    weekId: string
-  ): Attendance | undefined {
-    return attendanceMap.get(`${memberId}_${sessionId}_${weekId}`);
-  }
-
   // Summary stats
-  const totalAllocated = sessionAllocations.length;
-  const presentCount = sessionAllocations.filter((a) => {
-    const att = getAttendance(a.member_id, a.session_id, a.week_id);
-    return att?.status === "present";
-  }).length;
-  const absentCount = sessionAllocations.filter((a) => {
-    const att = getAttendance(a.member_id, a.session_id, a.week_id);
-    return att?.status === "absent" || att?.status === "no_show";
-  }).length;
-  const vrCount = sessionAllocations.filter((a) => {
-    const att = getAttendance(a.member_id, a.session_id, a.week_id);
-    return att?.status === "vr";
-  }).length;
-  const notMarkedCount = totalAllocated - presentCount - absentCount - vrCount;
+  const summaryStats = useMemo(() => {
+    const totalAllocated = sessionAllocations.length;
+    const presentCount = sessionAllocations.filter((a) => {
+      const att = getAttendance(a.member_id, a.session_id, a.week_id);
+      return att?.status === "present";
+    }).length;
+    const absentCount = sessionAllocations.filter((a) => {
+      const att = getAttendance(a.member_id, a.session_id, a.week_id);
+      return att?.status === "absent" || att?.status === "no_show";
+    }).length;
+    const vrCount = sessionAllocations.filter((a) => {
+      const att = getAttendance(a.member_id, a.session_id, a.week_id);
+      return att?.status === "vr";
+    }).length;
+    const notMarkedCount = totalAllocated - presentCount - absentCount - vrCount;
 
-  async function handleMark(
-    memberId: string,
-    status: AttendanceStatus,
-    reason?: string
-  ) {
-    if (!selectedSessionId || !selectedWeekId) return;
-    setLoading(true);
-    setMessage(null);
+    return { totalAllocated, presentCount, absentCount, vrCount, notMarkedCount };
+  }, [sessionAllocations, getAttendance]);
 
-    const result = await markAttendance({
-      memberId,
-      sessionId: selectedSessionId,
-      weekId: selectedWeekId,
-      status,
-      reason,
-    });
+  const handleMark = useCallback(
+    async (memberId: string, status: AttendanceStatus, reason?: string) => {
+      if (!selectedSessionId || !selectedWeekId) return;
+      setLoading(true);
+      setMessage(null);
 
-    if (result.error) {
-      setMessage(`Error: ${result.error}`);
-    } else {
-      setMessage(`Attendance marked as ${statusLabel(status)}.`);
-    }
-    setLoading(false);
-  }
+      const result = await markAttendance({
+        memberId,
+        sessionId: selectedSessionId,
+        weekId: selectedWeekId,
+        status,
+        reason,
+      });
 
-  function openVrDialog(memberId: string) {
+      if (result.error) {
+        setMessageType("error");
+        setMessage(result.error);
+      } else {
+        setMessageType("success");
+        setMessage(`Attendance marked as ${statusLabel(status)}.`);
+        // Auto-dismiss success message after 5 seconds
+        setTimeout(() => setMessage(null), 5000);
+      }
+      setLoading(false);
+    },
+    [selectedSessionId, selectedWeekId]
+  );
+
+  const openVrDialog = useCallback((memberId: string) => {
     setVrMemberId(memberId);
     setVrReason("");
     setVrDialogOpen(true);
-  }
+  }, []);
 
-  async function handleVrSubmit() {
+  const handleVrSubmit = useCallback(async () => {
     if (!vrMemberId) return;
     await handleMark(vrMemberId, "vr", vrReason);
     setVrDialogOpen(false);
     setVrMemberId("");
     setVrReason("");
-  }
+  }, [vrMemberId, vrReason, handleMark]);
 
   // ── Special Events helpers ──
 
   // Filter special events for the selected week
-  const weekSpecialEvents = specialEvents.filter(
-    (e) => e.week_id === selectedWeekId
+  const weekSpecialEvents = useMemo(
+    () => specialEvents.filter((e) => e.week_id === selectedWeekId),
+    [specialEvents, selectedWeekId]
   );
 
   // Build a set of attended (specialEventId + memberId) for quick lookup
-  const specialAttendanceSet = new Set(
-    specialEventAttendance.map((sa) => `${sa.special_event_id}_${sa.member_id}`)
+  const specialAttendanceSet = useMemo(
+    () =>
+      new Set(
+        specialEventAttendance.map(
+          (sa) => `${sa.special_event_id}_${sa.member_id}`
+        )
+      ),
+    [specialEventAttendance]
   );
 
-  function hasMemberAttendedEvent(
-    specialEventId: string,
-    memberId: string
-  ): boolean {
-    return specialAttendanceSet.has(`${specialEventId}_${memberId}`);
-  }
+  const hasMemberAttendedEvent = useCallback(
+    (specialEventId: string, memberId: string): boolean => {
+      return specialAttendanceSet.has(`${specialEventId}_${memberId}`);
+    },
+    [specialAttendanceSet]
+  );
 
-  function getEventAttendedCount(specialEventId: string): number {
-    return specialEventAttendance.filter(
-      (sa) => sa.special_event_id === specialEventId
-    ).length;
-  }
+  const getEventAttendedCount = useCallback(
+    (specialEventId: string): number => {
+      return specialEventAttendance.filter(
+        (sa) => sa.special_event_id === specialEventId
+      ).length;
+    },
+    [specialEventAttendance]
+  );
 
-  async function handleCreateEvent() {
+  const handleCreateEvent = useCallback(async () => {
     if (!selectedWeekId || !newEventName.trim() || !newEventDate) return;
     setEventLoading(true);
     setMessage(null);
@@ -267,62 +301,75 @@ export function AttendanceClient({
     });
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
+      setMessageType("success");
       setMessage("Special event created.");
       setCreateEventDialogOpen(false);
       setNewEventName("");
       setNewEventDate("");
+      // Auto-dismiss success message after 5 seconds
+      setTimeout(() => setMessage(null), 5000);
     }
     setEventLoading(false);
-  }
+  }, [selectedWeekId, newEventName, newEventDate]);
 
-  async function handleDeleteEvent(eventId: string) {
+  const handleDeleteEvent = useCallback(async (eventId: string) => {
     setEventLoading(true);
     setMessage(null);
 
     const result = await deleteSpecialEvent(eventId);
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
+      setMessageType("success");
       setMessage("Special event deleted.");
+      // Auto-dismiss success message after 5 seconds
+      setTimeout(() => setMessage(null), 5000);
     }
     setEventLoading(false);
-  }
+    setDeleteEventTarget(null);
+  }, []);
 
-  async function handleToggleEventAttendance(
-    specialEventId: string,
-    memberId: string
-  ) {
-    setEventLoading(true);
-    setMessage(null);
+  const handleToggleEventAttendance = useCallback(
+    async (specialEventId: string, memberId: string) => {
+      setTogglingId(`${specialEventId}_${memberId}`);
+      setMessage(null);
 
-    const result = await toggleSpecialEventAttendance({
-      specialEventId,
-      memberId,
-    });
+      const result = await toggleSpecialEventAttendance({
+        specialEventId,
+        memberId,
+      });
 
-    if (result.error) {
-      setMessage(`Error: ${result.error}`);
-    }
-    setEventLoading(false);
-  }
+      if (result.error) {
+        setMessageType("error");
+        setMessage(result.error);
+      }
+      setTogglingId(null);
+    },
+    []
+  );
 
-  function getEventMemberSearch(eventId: string): string {
-    return eventMemberSearch[eventId] ?? "";
-  }
+  const getEventMemberSearch = useCallback(
+    (eventId: string): string => {
+      return eventMemberSearch[eventId] ?? "";
+    },
+    [eventMemberSearch]
+  );
 
-  function setEventMemberSearchValue(eventId: string, value: string) {
+  const setEventMemberSearchValue = useCallback((eventId: string, value: string) => {
     setEventMemberSearch((prev) => ({ ...prev, [eventId]: value }));
-  }
+  }, []);
 
   // When week changes, reset session selection
-  function handleWeekChange(weekId: string) {
+  const handleWeekChange = useCallback((weekId: string) => {
     setSelectedWeekId(weekId);
     setSelectedSessionId("");
     setMessage(null);
-  }
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -338,7 +385,7 @@ export function AttendanceClient({
       {message && (
         <div
           className={`rounded-md p-3 text-sm ${
-            message.startsWith("Error")
+            messageType === "error"
               ? "bg-red-50 text-red-700"
               : "bg-green-50 text-green-700"
           }`}
@@ -429,7 +476,7 @@ export function AttendanceClient({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold">{totalAllocated}</p>
+              <p className="text-2xl font-bold">{summaryStats.totalAllocated}</p>
             </CardContent>
           </Card>
           <Card size="sm">
@@ -440,7 +487,7 @@ export function AttendanceClient({
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-bold text-green-600">
-                {presentCount}
+                {summaryStats.presentCount}
               </p>
             </CardContent>
           </Card>
@@ -451,7 +498,7 @@ export function AttendanceClient({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold text-red-600">{absentCount}</p>
+              <p className="text-2xl font-bold text-red-600">{summaryStats.absentCount}</p>
             </CardContent>
           </Card>
           <Card size="sm">
@@ -461,7 +508,7 @@ export function AttendanceClient({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold text-amber-600">{vrCount}</p>
+              <p className="text-2xl font-bold text-amber-600">{summaryStats.vrCount}</p>
             </CardContent>
           </Card>
           <Card size="sm">
@@ -472,7 +519,7 @@ export function AttendanceClient({
             </CardHeader>
             <CardContent>
               <p className="text-2xl font-bold text-gray-400">
-                {notMarkedCount}
+                {summaryStats.notMarkedCount}
               </p>
             </CardContent>
           </Card>
@@ -649,7 +696,7 @@ export function AttendanceClient({
                             <Button
                               variant="destructive"
                               size="sm"
-                              onClick={() => handleDeleteEvent(event.id)}
+                              onClick={() => setDeleteEventTarget(event)}
                               disabled={eventLoading}
                             >
                               Delete
@@ -690,7 +737,7 @@ export function AttendanceClient({
                                         member.id
                                       )
                                     }
-                                    disabled={eventLoading}
+                                    disabled={togglingId === `${event.id}_${member.id}`}
                                     className="h-4 w-4 rounded border-gray-300"
                                   />
                                   <span className="text-sm font-medium">
@@ -800,6 +847,34 @@ export function AttendanceClient({
             </Button>
             <Button onClick={handleVrSubmit} disabled={loading}>
               {loading ? "Saving..." : "Mark as VR"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Special Event Confirmation Dialog */}
+      <Dialog open={!!deleteEventTarget} onOpenChange={(open) => !open && setDeleteEventTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Special Event</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete &apos;{deleteEventTarget?.name}&apos;? All attendance records for this event will be lost.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteEventTarget(null)}
+              disabled={eventLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => deleteEventTarget && handleDeleteEvent(deleteEventTarget.id)}
+              disabled={eventLoading}
+            >
+              {eventLoading ? "Deleting..." : "Delete Event"}
             </Button>
           </DialogFooter>
         </DialogContent>

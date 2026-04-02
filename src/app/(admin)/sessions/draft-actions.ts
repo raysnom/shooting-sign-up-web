@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { ROLLING_WINDOW_WEEKS } from "@/lib/constants";
 import { runDraftEngine } from "@/lib/algorithm/draft-engine";
+import { logAudit } from "@/lib/utils/audit";
 import type {
   DraftSession,
   DraftPreference,
@@ -14,8 +15,10 @@ import type {
   AttendanceStatus,
   TrainingRequirement,
   TrainingTargetType,
+  WeekStatus,
 } from "@/types/database";
 import { DIVISION_MAP } from "@/lib/constants";
+import { isValidUUID } from "@/lib/utils/validation";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -50,19 +53,39 @@ export async function runDraft(weekId: string) {
   // 1. Verify caller is president
   const { error: authError, userId } = await verifyPresident();
   if (authError || !userId) return { error: authError };
+  if (!isValidUUID(weekId)) return { error: "Invalid week ID." };
 
   const admin = createAdminClient();
 
-  // 2. Fetch the week (must be status "closed")
+  // 2. Fetch the week (must be status "closed") — use atomic status check
+  //    to prevent concurrent draft execution. Only proceed if status is exactly "closed".
   const { data: week, error: weekError } = await admin
     .from("weeks")
     .select("*")
     .eq("id", weekId)
     .single();
 
-  if (weekError || !week) return { error: weekError?.message ?? "Week not found" };
+  if (weekError || !week) return { error: "Week not found." };
   if (week.status !== "closed") {
     return { error: "Draft can only run on weeks with status 'closed'." };
+  }
+
+  // Atomically set status to "drafting" to prevent concurrent runs
+  const { data: locked, error: lockError } = await admin
+    .from("weeks")
+    .update({ status: "drafting" as WeekStatus })
+    .eq("id", weekId)
+    .eq("status", "closed")
+    .select("id")
+    .single();
+
+  if (lockError || !locked) {
+    return { error: "Draft is already in progress for this week." };
+  }
+
+  // Helper: rollback on failure — revert week status to "closed"
+  async function rollback() {
+    await admin.from("weeks").update({ status: "closed" as WeekStatus }).eq("id", weekId);
   }
 
   // 3. Fetch all non-cancelled sessions for the week
@@ -72,8 +95,9 @@ export async function runDraft(weekId: string) {
     .eq("week_id", weekId)
     .eq("is_cancelled", false);
 
-  if (sessionsError) return { error: sessionsError.message };
+  if (sessionsError) { await rollback(); return { error: "Failed to fetch sessions." }; }
   if (!sessionsRaw || sessionsRaw.length === 0) {
+    await rollback();
     return { error: "No active sessions found for this week." };
   }
 
@@ -95,27 +119,30 @@ export async function runDraft(weekId: string) {
     .eq("week_id", weekId)
     .in("session_id", sessionIds);
 
-  if (prefsError) return { error: prefsError.message };
+  if (prefsError) { await rollback(); return { error: "Failed to fetch preferences." }; }
   if (!prefsRaw || prefsRaw.length === 0) {
+    await rollback();
     return { error: "No preferences submitted for this week." };
   }
 
   // Split preferences into on-time vs late based on submission deadline
   const deadline = new Date(week.submission_deadline);
-  const onTimePrefsRaw = prefsRaw.filter((p) => new Date(p.created_at as string) <= deadline);
-  const latePrefsRaw = prefsRaw.filter((p) => new Date(p.created_at as string) > deadline);
+  const preferences: DraftPreference[] = [];
+  const latePreferences: DraftPreference[] = [];
 
-  const preferences: DraftPreference[] = onTimePrefsRaw.map((p) => ({
-    member_id: p.member_id as string,
-    session_id: p.session_id as string,
-    rank: p.rank as number,
-  }));
+  for (const p of prefsRaw) {
+    const pref: DraftPreference = {
+      member_id: p.member_id as string,
+      session_id: p.session_id as string,
+      rank: p.rank as number,
+    };
 
-  const latePreferences: DraftPreference[] = latePrefsRaw.map((p) => ({
-    member_id: p.member_id as string,
-    session_id: p.session_id as string,
-    rank: p.rank as number,
-  }));
+    if (new Date(p.created_at as string) <= deadline) {
+      preferences.push(pref);
+    } else {
+      latePreferences.push(pref);
+    }
+  }
 
   // Collect unique member IDs who have preferences
   const memberIdsWithPrefs = [...new Set(preferences.map((p) => p.member_id))];
@@ -127,30 +154,28 @@ export async function runDraft(weekId: string) {
     .in("id", memberIdsWithPrefs)
     .eq("archived", false);
 
-  if (membersError) return { error: membersError.message };
+  if (membersError) { await rollback(); return { error: "Failed to fetch members." }; }
   if (!membersRaw || membersRaw.length === 0) {
+    await rollback();
     return { error: "No active members found with preferences." };
   }
 
-  const draftMembers: DraftMember[] = membersRaw.map((m) => ({
-    id: m.id as string,
-    no_show_count: (m.no_show_count as number) ?? 0,
-    gun_id: (m.gun_id as string | null) ?? null,
-  }));
-
-  // Build memberGunMap and memberNames
+  const draftMembers: DraftMember[] = [];
   const memberGunMap = new Map<string, string | null>();
   const memberNames = new Map<string, string>();
-  for (const m of membersRaw) {
-    memberGunMap.set(m.id as string, (m.gun_id as string | null) ?? null);
-    memberNames.set(m.id as string, m.name as string);
-  }
-
-  // Build EXCO member IDs (role = "exco" or "president")
   const excoMemberIds = new Set<string>();
+
   for (const m of membersRaw) {
+    const memberId = m.id as string;
+    draftMembers.push({
+      id: memberId,
+      no_show_count: (m.no_show_count as number) ?? 0,
+      gun_id: (m.gun_id as string | null) ?? null,
+    });
+    memberGunMap.set(memberId, (m.gun_id as string | null) ?? null);
+    memberNames.set(memberId, m.name as string);
     if (m.role === "exco" || m.role === "president") {
-      excoMemberIds.add(m.id as string);
+      excoMemberIds.add(memberId);
     }
   }
 
@@ -160,16 +185,16 @@ export async function runDraft(weekId: string) {
     .select("*")
     .eq("week_id", weekId);
 
-  if (requirementsError) return { error: requirementsError.message };
+  if (requirementsError) { await rollback(); return { error: "Failed to fetch requirements." }; }
 
   const typedRequirements = (requirementsRaw as TrainingRequirement[]) ?? [];
 
   // Fetch competition group memberships for group-type requirements
-  const groupRequirements = typedRequirements.filter(
-    (r) => r.target_type === "group"
-  );
-  const groupIds = groupRequirements.map((r) => r.target_value);
-  let groupMembershipMap = new Map<string, Set<string>>(); // groupId -> Set<memberId>
+  const groupIds = typedRequirements
+    .filter((r) => r.target_type === "group")
+    .map((r) => r.target_value);
+
+  const groupMembershipMap = new Map<string, Set<string>>();
 
   if (groupIds.length > 0) {
     const { data: groupMembersRaw } = await admin
@@ -181,10 +206,9 @@ export async function runDraft(weekId: string) {
       for (const gm of groupMembersRaw) {
         const gid = gm.group_id as string;
         const mid = gm.member_id as string;
-        if (!groupMembershipMap.has(gid)) {
-          groupMembershipMap.set(gid, new Set());
-        }
-        groupMembershipMap.get(gid)!.add(mid);
+        const members = groupMembershipMap.get(gid) ?? new Set<string>();
+        members.add(mid);
+        groupMembershipMap.set(gid, members);
       }
     }
   }
@@ -201,11 +225,9 @@ export async function runDraft(weekId: string) {
     .select("id")
     .eq("week_id", weekId);
 
-  const specialEventIds = ((specialEventsRaw as { id: string }[]) ?? []).map(
-    (e) => e.id
-  );
+  const specialEventIds = (specialEventsRaw as { id: string }[] | null)?.map((e) => e.id) ?? [];
+  const specialEventAttendanceByMember = new Map<string, number>();
 
-  let specialEventAttendanceByMember = new Map<string, number>();
   if (specialEventIds.length > 0) {
     const { data: seAttendanceRaw } = await admin
       .from("special_event_attendance")
@@ -215,10 +237,7 @@ export async function runDraft(weekId: string) {
     if (seAttendanceRaw) {
       for (const sa of seAttendanceRaw) {
         const mid = sa.member_id as string;
-        specialEventAttendanceByMember.set(
-          mid,
-          (specialEventAttendanceByMember.get(mid) ?? 0) + 1
-        );
+        specialEventAttendanceByMember.set(mid, (specialEventAttendanceByMember.get(mid) ?? 0) + 1);
       }
     }
   }
@@ -291,11 +310,8 @@ export async function runDraft(weekId: string) {
   }
 
   // 7. Past allocations (4-week rolling window) -> count live fire per member
-  const weekStartDate = new Date(week.start_date + "T00:00:00");
-  const rollingStartDate = new Date(weekStartDate);
-  rollingStartDate.setDate(
-    rollingStartDate.getDate() - ROLLING_WINDOW_WEEKS * 7
-  );
+  const rollingStartDate = new Date(week.start_date + "T00:00:00");
+  rollingStartDate.setDate(rollingStartDate.getDate() - ROLLING_WINDOW_WEEKS * 7);
   const rollingStartStr = rollingStartDate.toISOString().split("T")[0];
 
   // Find weeks in the rolling window
@@ -305,7 +321,7 @@ export async function runDraft(weekId: string) {
     .gte("start_date", rollingStartStr)
     .lt("start_date", week.start_date);
 
-  if (rollingWeeksError) return { error: rollingWeeksError.message };
+  if (rollingWeeksError) { await rollback(); return { error: "Failed to fetch rolling window data." }; }
 
   const pastLiveFireCounts = new Map<string, number>();
 
@@ -319,7 +335,7 @@ export async function runDraft(weekId: string) {
       .eq("type", "live")
       .eq("cancelled", false);
 
-    if (pastAllocError) return { error: pastAllocError.message };
+    if (pastAllocError) { await rollback(); return { error: "Failed to fetch past allocations." }; }
 
     if (pastAllocations) {
       for (const alloc of pastAllocations) {
@@ -340,7 +356,7 @@ export async function runDraft(weekId: string) {
     .select("member_id, status")
     .in("member_id", memberIdsWithPrefs);
 
-  if (attendanceError) return { error: attendanceError.message };
+  if (attendanceError) { await rollback(); return { error: "Failed to fetch attendance data." }; }
 
   if (attendanceRaw && attendanceRaw.length > 0) {
     // Group by member_id
@@ -354,11 +370,8 @@ export async function runDraft(weekId: string) {
     }
 
     for (const [memberId, statuses] of attendanceByMember) {
-      const attended = statuses.filter(
-        (s) => s === "present" || s === "vr"
-      ).length;
-      const total = statuses.length;
-      const rate = total > 0 ? (attended / total) * 100 : 85;
+      const attended = statuses.filter((s) => s === "present" || s === "vr").length;
+      const rate = statuses.length > 0 ? (attended / statuses.length) * 100 : 85;
       attendanceRates.set(memberId, rate);
     }
   }
@@ -402,7 +415,7 @@ export async function runDraft(weekId: string) {
       .from("allocations")
       .insert(allocationRows);
 
-    if (insertAllocError) return { error: insertAllocError.message };
+    if (insertAllocError) { await rollback(); return { error: "Failed to save allocations." }; }
   }
 
   // 11. Write exco_duty rows (bulk insert)
@@ -417,7 +430,7 @@ export async function runDraft(weekId: string) {
       .from("exco_duty")
       .insert(excoDutyRows);
 
-    if (insertExcoError) return { error: insertExcoError.message };
+    if (insertExcoError) { await rollback(); return { error: "Failed to save EXCO duties." }; }
   }
 
   // 12. Update week status to "drafted"
@@ -426,7 +439,9 @@ export async function runDraft(weekId: string) {
     .update({ status: "drafted" })
     .eq("id", weekId);
 
-  if (updateError) return { error: updateError.message };
+  if (updateError) return { error: "Failed to update week status." };
+
+  await logAudit("draft.run", userId, weekId, { allocations: draftResult.allocations.length });
 
   // 13. Revalidate
   revalidatePath("/sessions");

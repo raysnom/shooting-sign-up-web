@@ -3,10 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-
-// ──────────────────────────────────────────────
-// Auth helper
-// ──────────────────────────────────────────────
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
 async function verifyPresident() {
   const supabase = await createClient();
@@ -22,38 +19,32 @@ async function verifyPresident() {
     .single();
 
   if (caller?.role !== "president") return { error: "Not authorized" };
-  return { error: null, userId: user.id };
+  return { userId: user.id };
 }
 
-// ──────────────────────────────────────────────
-// Create a competition group
-// ──────────────────────────────────────────────
-
 export async function createGroup(name: string) {
-  const { error: authError, userId } = await verifyPresident();
-  if (authError) return { error: authError };
+  const auth = await verifyPresident();
+  if ("error" in auth) return { error: auth.error };
 
   if (!name.trim()) return { error: "Group name is required" };
 
   const admin = createAdminClient();
   const { error } = await admin.from("competition_groups").insert({
     name: name.trim(),
-    created_by: userId,
+    created_by: auth.userId,
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/groups");
   return { success: true };
 }
 
-// ──────────────────────────────────────────────
-// Delete a competition group
-// ──────────────────────────────────────────────
-
 export async function deleteGroup(id: string) {
-  const { error: authError } = await verifyPresident();
-  if (authError) return { error: authError };
+  const auth = await verifyPresident();
+  if ("error" in auth) return { error: auth.error };
+
+  if (!isValidUUID(id)) return { error: "Invalid group ID." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -61,19 +52,18 @@ export async function deleteGroup(id: string) {
     .delete()
     .eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/groups");
   return { success: true };
 }
 
-// ──────────────────────────────────────────────
-// Add a member to a group
-// ──────────────────────────────────────────────
-
 export async function addGroupMember(groupId: string, memberId: string) {
-  const { error: authError } = await verifyPresident();
-  if (authError) return { error: authError };
+  const auth = await verifyPresident();
+  if ("error" in auth) return { error: auth.error };
+
+  if (!isValidUUID(groupId)) return { error: "Invalid group ID." };
+  if (!isValidUUID(memberId)) return { error: "Invalid member ID." };
 
   const admin = createAdminClient();
   const { error } = await admin.from("competition_group_members").insert({
@@ -81,19 +71,17 @@ export async function addGroupMember(groupId: string, memberId: string) {
     member_id: memberId,
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/groups");
   return { success: true };
 }
 
-// ──────────────────────────────────────────────
-// Remove a member from a group
-// ──────────────────────────────────────────────
-
 export async function removeGroupMember(id: string) {
-  const { error: authError } = await verifyPresident();
-  if (authError) return { error: authError };
+  const auth = await verifyPresident();
+  if ("error" in auth) return { error: auth.error };
+
+  if (!isValidUUID(id)) return { error: "Invalid group member ID." };
 
   const admin = createAdminClient();
   const { error } = await admin
@@ -101,7 +89,7 @@ export async function removeGroupMember(id: string) {
     .delete()
     .eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/groups");
   return { success: true };

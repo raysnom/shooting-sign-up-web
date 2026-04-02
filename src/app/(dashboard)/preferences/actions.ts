@@ -2,6 +2,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
+import { rateLimit } from "@/lib/utils/rate-limit";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -32,6 +34,23 @@ export async function submitPreferences(
   const { error: authError, userId } = await verifyMember();
   if (authError || !userId) return { error: authError ?? "Not authenticated" };
 
+  // Rate limiting: 10 submissions per minute per user
+  const { allowed } = rateLimit(`prefs:${userId}`, 10, 60_000);
+  if (!allowed) return { error: "Too many submissions. Please wait a minute." };
+
+  if (!isValidUUID(weekId)) return { error: "Invalid week ID." };
+
+  // Validate rankings
+  if (rankings.length > 10) return { error: "Too many preferences." };
+  for (const r of rankings) {
+    if (!isValidUUID(r.session_id)) return { error: "Invalid session ID in rankings." };
+    if (r.rank < 1 || r.rank > 10 || !Number.isInteger(r.rank)) return { error: "Invalid rank value." };
+  }
+
+  // Check for duplicate session IDs
+  const sessionIdSet = new Set(rankings.map((r) => r.session_id));
+  if (sessionIdSet.size !== rankings.length) return { error: "Duplicate sessions in rankings." };
+
   const supabase = await createClient();
 
   // Verify the week exists and is open (no deadline check - late submissions allowed)
@@ -57,7 +76,7 @@ export async function submitPreferences(
     .eq("week_id", weekId);
 
   if (deleteError) {
-    return { error: deleteError.message };
+    return { error: sanitizeDbError(deleteError) };
   }
 
   // Insert new preferences (if any rankings provided)
@@ -74,7 +93,7 @@ export async function submitPreferences(
       .insert(rows);
 
     if (insertError) {
-      return { error: insertError.message };
+      return { error: sanitizeDbError(insertError) };
     }
   }
 

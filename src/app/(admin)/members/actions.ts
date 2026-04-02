@@ -4,10 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { TeamType, LevelType, RoleType } from "@/types/database";
-
-// ──────────────────────────────────────────────
-// Validation helpers
-// ──────────────────────────────────────────────
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
+import { logAudit } from "@/lib/utils/audit";
 
 const VALID_TEAMS: readonly string[] = ["APW", "APM", "ARM", "ARW"];
 const VALID_LEVELS: readonly string[] = ["JH1", "JH2", "JH3", "JH4", "SH1", "SH2"];
@@ -15,13 +13,40 @@ const VALID_ROLES: readonly string[] = ["member", "exco", "president"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_FIELD_LENGTH = 255;
 
-/** Strip leading characters that trigger formula execution in spreadsheets */
 function sanitizeCell(value: string): string {
-  return value.replace(/^[=+\-@\t\r]+/, "");
+  // Strip leading formula trigger characters and wrap in single quote if still suspicious
+  let cleaned = value.replace(/^[=+\-@\t\r\x00]+/, "");
+  // Also strip DDE payloads like |cmd, |MSEXCEL
+  cleaned = cleaned.replace(/^\|/g, "");
+  // Escape embedded quotes for CSV safety
+  cleaned = cleaned.replace(/"/g, '""');
+  return cleaned;
 }
 
 function validateEmail(email: string): boolean {
   return EMAIL_REGEX.test(email) && email.length <= MAX_FIELD_LENGTH;
+}
+
+async function verifyPresidentRole() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (!user) return { error: "Not authenticated" };
+
+  const { data: caller } = await supabase
+    .from("members")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (caller?.role !== "president") return { error: "Not authorized" };
+
+  return { user };
+}
+
+function generateTempPassword(name: string): string {
+  const firstName = name.split(" ")[0];
+  return `${firstName}2026!`;
 }
 
 type CreateMemberInput = {
@@ -34,24 +59,9 @@ type CreateMemberInput = {
 };
 
 export async function createMember(input: CreateMemberInput) {
-  const supabase = await createClient();
-  const admin = createAdminClient();
+  const authResult = await verifyPresidentRole();
+  if ("error" in authResult) return authResult;
 
-  // Verify caller is president
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Not authenticated" };
-
-  const { data: caller } = await supabase
-    .from("members")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (caller?.role !== "president") return { error: "Not authorized" };
-
-  // Validate inputs
   if (!input.name || input.name.length > MAX_FIELD_LENGTH)
     return { error: "Name is required and must be under 255 characters" };
   if (!input.login_id || input.login_id.length > MAX_FIELD_LENGTH)
@@ -63,22 +73,19 @@ export async function createMember(input: CreateMemberInput) {
   if (!VALID_LEVELS.includes(input.level))
     return { error: `Invalid level. Must be one of: ${VALID_LEVELS.join(", ")}` };
 
-  // Generate temporary password: FirstName2026!
-  const firstName = input.name.split(" ")[0];
-  const tempPassword = `${firstName}2026!`;
+  const admin = createAdminClient();
+  const tempPassword = generateTempPassword(input.name);
 
-  // Create auth user with password (no email invite)
   const { data: authUser, error: authError } =
     await admin.auth.admin.createUser({
       email: input.email,
       password: tempPassword,
-      email_confirm: true, // Skip email confirmation
+      email_confirm: true,
       user_metadata: { login_id: input.login_id, name: input.name },
     });
 
-  if (authError) return { error: authError.message };
+  if (authError) return { error: sanitizeDbError(authError) };
 
-  // Create member profile
   const { error: memberError } = await admin.from("members").insert({
     id: authUser.user.id,
     login_id: input.login_id,
@@ -89,32 +96,18 @@ export async function createMember(input: CreateMemberInput) {
     role: input.role,
   });
 
-  if (memberError) return { error: memberError.message };
+  if (memberError) return { error: sanitizeDbError(memberError) };
+
+  await logAudit("member.create", authResult.user.id, authUser.user.id, { email: input.email });
 
   revalidatePath("/members");
   return { success: true };
 }
 
 export async function bulkUploadMembers(csvData: string) {
-  const supabase = await createClient();
-  const admin = createAdminClient();
+  const authResult = await verifyPresidentRole();
+  if ("error" in authResult) return { error: authResult.error, results: [] };
 
-  // Verify caller is president
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Not authenticated", results: [] };
-
-  const { data: caller } = await supabase
-    .from("members")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (caller?.role !== "president")
-    return { error: "Not authorized", results: [] };
-
-  // Parse CSV
   const lines = csvData
     .split("\n")
     .map((line) => line.trim())
@@ -127,6 +120,8 @@ export async function bulkUploadMembers(csvData: string) {
   if (lines.length > 501) {
     return { error: "CSV must not exceed 500 data rows", results: [] };
   }
+
+  const admin = createAdminClient();
 
   const header = lines[0].toLowerCase().split(",").map((h) => h.trim());
   const requiredColumns = ["login_id", "name", "email", "team", "level"];
@@ -178,16 +173,13 @@ export async function bulkUploadMembers(csvData: string) {
     }
     row.role = row.role ? row.role.toLowerCase() : "member";
 
-    // Generate temporary password: FirstName2026!
-    const firstName = row.name.split(" ")[0];
-    const tempPassword = `${firstName}2026!`;
+    const tempPassword = generateTempPassword(row.name);
 
-    // Create auth user with password (no email invite)
     const { data: authUser, error: authError } =
       await admin.auth.admin.createUser({
         email: row.email,
         password: tempPassword,
-        email_confirm: true, // Skip email confirmation
+        email_confirm: true,
         user_metadata: { login_id: row.login_id, name: row.name },
       });
 
@@ -215,6 +207,8 @@ export async function bulkUploadMembers(csvData: string) {
     results.push({ email: row.email, success: true });
   }
 
+  await logAudit("member.bulk_upload", authResult.user.id, undefined, { count: results.filter(r => r.success).length });
+
   revalidatePath("/members");
   return {
     error: null,
@@ -223,44 +217,27 @@ export async function bulkUploadMembers(csvData: string) {
   };
 }
 
-export async function updateMember(
-  memberId: string,
-  updates: Partial<{
-    name: string;
-    team: TeamType;
-    level: LevelType;
-    role: RoleType;
-    archived: boolean;
-  }>
-) {
-  const supabase = await createClient();
+export async function archiveMember(memberId: string) {
+  const authResult = await verifyPresidentRole();
+  if ("error" in authResult) return authResult;
 
-  // Verify caller is president
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Not authenticated" };
+  if (!isValidUUID(memberId)) return { error: "Invalid member ID." };
 
-  const { data: caller } = await supabase
-    .from("members")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (caller?.role !== "president") return { error: "Not authorized" };
+  // Prevent president from archiving themselves
+  if (authResult.user.id === memberId) {
+    return { error: "You cannot archive yourself. Transfer presidency first." };
+  }
 
   const admin = createAdminClient();
   const { error } = await admin
     .from("members")
-    .update(updates)
+    .update({ archived: true })
     .eq("id", memberId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
+
+  await logAudit("member.archive", authResult.user.id, memberId);
 
   revalidatePath("/members");
   return { success: true };
-}
-
-export async function archiveMember(memberId: string) {
-  return updateMember(memberId, { archived: true });
 }

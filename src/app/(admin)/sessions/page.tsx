@@ -26,9 +26,9 @@ export default async function SessionsPage() {
 
   return (
     <SessionsClient
-      semesters={(semesters as Semester[]) || []}
-      weeks={(weeks as Week[]) || []}
-      sessions={(sessions as Session[]) || []}
+      semesters={(semesters as Semester[]) ?? []}
+      weeks={(weeks as Week[]) ?? []}
+      sessions={(sessions as Session[]) ?? []}
     />
   );
 }

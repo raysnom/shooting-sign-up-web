@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useMemo, useCallback } from "react";
 import type { Week, Session, ExcoDuty, DayType } from "@/types/database";
 import type { AllocationWithSession, AllocationWithSessionAndMember } from "./page";
 import { DAY_LABELS, TEAM_LABELS } from "@/lib/constants";
@@ -100,74 +100,102 @@ export function ScheduleClient({
   currentMemberId,
 }: ScheduleClientProps) {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [messageType, setMessageType] = useState<"error" | "success">("success");
   const [isPending, startTransition] = useTransition();
+
+  // Cancel confirmation dialog state
+  const [cancelTarget, setCancelTarget] = useState<string | null>(null);
 
   // Provide Reason dialog state
   const [reasonDialogOpen, setReasonDialogOpen] = useState(false);
   const [reasonAllocId, setReasonAllocId] = useState<string | null>(null);
   const [reasonText, setReasonText] = useState("");
   const [reasonSubmitting, setReasonSubmitting] = useState(false);
-  const [reasonSuccess, setReasonSuccess] = useState<string | null>(null);
 
-  const excoDutySessionIds = new Set(excoDuties.map((d) => d.session_id));
-  const grouped = groupByDay(allocations);
-  const orderedDays = DAY_ORDER.filter((d) => grouped[d] !== undefined);
+  const excoDutySessionIds = useMemo(
+    () => new Set(excoDuties.map((d) => d.session_id)),
+    [excoDuties]
+  );
+
+  const grouped = useMemo(() => groupByDay(allocations), [allocations]);
+
+  const orderedDays = useMemo(
+    () => DAY_ORDER.filter((d) => grouped[d] !== undefined),
+    [grouped]
+  );
 
   // Group sessions by day for the full schedule view
-  const sessionsByDay = DAY_ORDER.map((day) => ({
-    day,
-    label: DAY_LABELS[day] ?? day,
-    sessions: sessions
-      .filter((s) => s.day === day)
-      .sort((a, b) => a.time_start.localeCompare(b.time_start)),
-  })).filter((g) => g.sessions.length > 0);
+  const sessionsByDay = useMemo(
+    () =>
+      DAY_ORDER.map((day) => ({
+        day,
+        label: DAY_LABELS[day] ?? day,
+        sessions: sessions
+          .filter((s) => s.day === day)
+          .sort((a, b) => a.time_start.localeCompare(b.time_start)),
+      })).filter((g) => g.sessions.length > 0),
+    [sessions]
+  );
 
   // Build a map: session_id -> allocations for that session
-  const allocationsBySession = new Map<string, AllocationWithSessionAndMember[]>();
-  for (const alloc of allAllocations) {
-    const list = allocationsBySession.get(alloc.session_id) || [];
-    list.push(alloc);
-    allocationsBySession.set(alloc.session_id, list);
-  }
+  const allocationsBySession = useMemo(() => {
+    const map = new Map<string, AllocationWithSessionAndMember[]>();
+    for (const alloc of allAllocations) {
+      const list = map.get(alloc.session_id) || [];
+      list.push(alloc);
+      map.set(alloc.session_id, list);
+    }
+    return map;
+  }, [allAllocations]);
 
-  function handleCancel(allocationId: string) {
-    setError(null);
-    setCancellingId(allocationId);
+  const handleCancel = useCallback(
+    (allocationId: string) => {
+      setMessage(null);
+      setCancellingId(allocationId);
 
-    startTransition(async () => {
-      const result = await cancelAllocation(allocationId);
-      if (result.error) {
-        setError(result.error);
-      }
-      setCancellingId(null);
-    });
-  }
+      startTransition(async () => {
+        const result = await cancelAllocation(allocationId);
+        if (result.error) {
+          setMessageType("error");
+          setMessage(result.error);
+        } else {
+          setMessageType("success");
+          setMessage("Slot cancelled successfully. You have been moved to dry fire.");
+          setTimeout(() => setMessage(null), 5000);
+        }
+        setCancellingId(null);
+        setCancelTarget(null);
+      });
+    },
+    [startTransition]
+  );
 
-  function openReasonDialog(allocationId: string) {
+  const openReasonDialog = useCallback((allocationId: string) => {
     setReasonAllocId(allocationId);
     setReasonText("");
-    setReasonSuccess(null);
-    setError(null);
+    setMessage(null);
     setReasonDialogOpen(true);
-  }
+  }, []);
 
-  async function handleSubmitReason() {
+  const handleSubmitReason = useCallback(async () => {
     if (!reasonAllocId) return;
     setReasonSubmitting(true);
-    setError(null);
-    setReasonSuccess(null);
+    setMessage(null);
 
     const result = await submitAbsenceReason(reasonAllocId, reasonText);
 
     if (result.error) {
-      setError(result.error);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
-      setReasonSuccess("Reason submitted successfully.");
+      setMessageType("success");
+      setMessage("Reason submitted successfully.");
+      setTimeout(() => setMessage(null), 5000);
       setReasonDialogOpen(false);
     }
     setReasonSubmitting(false);
-  }
+  }, [reasonAllocId, reasonText]);
 
   return (
     <div className="space-y-6">
@@ -188,19 +216,51 @@ export function ScheduleClient({
 
       <Separator />
 
-      {/* ── Error banner ── */}
-      {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
+      {/* ── Message banner ── */}
+      {message && (
+        <div
+          className={
+            messageType === "error"
+              ? "rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+              : "rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700"
+          }
+        >
+          {message}
         </div>
       )}
 
-      {/* ── Success banner ── */}
-      {reasonSuccess && (
-        <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          {reasonSuccess}
-        </div>
-      )}
+      {/* ── Cancel Confirmation Dialog ── */}
+      <Dialog
+        open={cancelTarget !== null}
+        onOpenChange={(open) => !open && setCancelTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel Live Fire Slot</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to cancel this live fire slot? You will be
+              moved to dry fire.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCancelTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => cancelTarget && handleCancel(cancelTarget)}
+            >
+              Confirm
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Provide Reason Dialog ── */}
       <Dialog
@@ -323,30 +383,26 @@ export function ScheduleClient({
                             </div>
                           )}
 
-                          <p className="text-xs text-muted-foreground">
-                            Priority score: {alloc.priority_score.toFixed(2)}
-                          </p>
-
-                          <div className="flex flex-wrap gap-2">
-                            {isLive && (
+                          {isLive && (
+                            <div className="flex flex-wrap gap-2">
                               <Button
                                 variant="destructive"
                                 size="sm"
                                 disabled={isCancelling}
-                                onClick={() => handleCancel(alloc.id)}
+                                onClick={() => setCancelTarget(alloc.id)}
                               >
                                 {isCancelling ? "Cancelling..." : "Cancel Slot"}
                               </Button>
-                            )}
 
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openReasonDialog(alloc.id)}
-                            >
-                              Provide Reason
-                            </Button>
-                          </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openReasonDialog(alloc.id)}
+                              >
+                                Provide Reason
+                              </Button>
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     );

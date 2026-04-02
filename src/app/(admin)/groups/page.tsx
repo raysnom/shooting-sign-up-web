@@ -12,28 +12,28 @@ export default async function GroupsPage() {
 
   const supabase = await createClient();
 
-  const { data: groups } = await supabase
-    .from("competition_groups")
-    .select("*")
-    .order("name", { ascending: true });
-
-  const { data: groupMembers } = await supabase
-    .from("competition_group_members")
-    .select("*, member:members(*)");
-
-  const { data: allMembers } = await supabase
-    .from("members")
-    .select("*")
-    .eq("archived", false)
-    .order("name", { ascending: true });
+  const [groupsResult, groupMembersResult, allMembersResult] = await Promise.all([
+    supabase
+      .from("competition_groups")
+      .select("*")
+      .order("name", { ascending: true }),
+    supabase
+      .from("competition_group_members")
+      .select("*, member:members(*)"),
+    supabase
+      .from("members")
+      .select("*")
+      .eq("archived", false)
+      .order("name", { ascending: true }),
+  ]);
 
   return (
     <GroupsClient
-      groups={(groups as CompetitionGroup[]) || []}
+      groups={(groupsResult.data as CompetitionGroup[]) ?? []}
       groupMembers={
-        (groupMembers as (CompetitionGroupMember & { member: Member })[]) || []
+        (groupMembersResult.data as (CompetitionGroupMember & { member: Member })[]) ?? []
       }
-      allMembers={(allMembers as Member[]) || []}
+      allMembers={(allMembersResult.data as Member[]) ?? []}
     />
   );
 }

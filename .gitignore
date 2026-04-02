@@ -46,3 +46,5 @@ members_import.csv
 *.tsbuildinfo
 next-env.d.ts
 nul
+
+.vercel

@@ -1,7 +1,9 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -23,6 +25,7 @@ async function verifyMember() {
 export async function cancelAllocation(allocationId: string) {
   const { error: authError, userId } = await verifyMember();
   if (authError || !userId) return { error: authError ?? "Not authenticated" };
+  if (!isValidUUID(allocationId)) return { error: "Invalid allocation ID." };
 
   const supabase = await createClient();
 
@@ -97,13 +100,17 @@ export async function cancelAllocation(allocationId: string) {
     .eq("id", allocationId);
 
   if (updateError) {
-    return { error: updateError.message };
+    return { error: sanitizeDbError(updateError) };
   }
 
   // ── Auto-upgrade: promote the highest-priority dry-fire allocation ──
+  // Use admin client for atomic upgrade to prevent race conditions
   if (allocation.type === "live") {
-    // Find all non-cancelled dry-fire allocations for the same session
-    const { data: dryAllocations } = await supabase
+    const admin = createAdminClient();
+
+    // Atomically find and promote the top dry-fire allocation
+    // Only promote if it's still type='dry' (guards against concurrent cancellations)
+    const { data: dryAllocations } = await admin
       .from("allocations")
       .select("*, members(gun_id)")
       .eq("session_id", allocation.session_id)
@@ -122,13 +129,15 @@ export async function cancelAllocation(allocationId: string) {
 
       const memberGunId = topDry.members?.gun_id ?? null;
 
-      await supabase
+      // Conditional update: only promote if still dry (prevents double-promote race)
+      await admin
         .from("allocations")
         .update({
           type: "live" as const,
           gun_id: memberGunId,
         })
-        .eq("id", topDry.id);
+        .eq("id", topDry.id)
+        .eq("type", "dry");
     }
   }
 
@@ -146,6 +155,7 @@ export async function submitAbsenceReason(
 ) {
   const { error: authError, userId } = await verifyMember();
   if (authError || !userId) return { error: authError ?? "Not authenticated" };
+  if (!isValidUUID(allocationId)) return { error: "Invalid allocation ID." };
 
   if (!reason.trim()) {
     return { error: "Please provide a reason." };
@@ -184,7 +194,7 @@ export async function submitAbsenceReason(
   );
 
   if (upsertError) {
-    return { error: upsertError.message };
+    return { error: sanitizeDbError(upsertError) };
   }
 
   revalidatePath("/schedule");

@@ -11,6 +11,7 @@ import {
   DEFAULT_DRY_LANES,
   DAY_LABELS,
 } from "@/lib/constants";
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -60,7 +61,7 @@ export async function createTemplate(input: CreateTemplateInput) {
     dry_lanes: input.dry_lanes,
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/templates");
   return { success: true };
@@ -83,13 +84,15 @@ export async function updateTemplate(id: string, updates: UpdateTemplateInput) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
 
+  if (!isValidUUID(id)) return { error: "Invalid template ID." };
+
   const admin = createAdminClient();
   const { error } = await admin
     .from("session_templates")
     .update(updates)
     .eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/templates");
   return { success: true };
@@ -103,13 +106,15 @@ export async function deleteTemplate(id: string) {
   const { error: authError } = await verifyPresident();
   if (authError) return { error: authError };
 
+  if (!isValidUUID(id)) return { error: "Invalid template ID." };
+
   const admin = createAdminClient();
   const { error } = await admin
     .from("session_templates")
     .delete()
     .eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/templates");
   return { success: true };
@@ -124,17 +129,8 @@ export async function seedDefaultTemplates() {
   if (authError) return { error: authError };
 
   const weekdays: DayType[] = ["mon", "tue", "wed", "thu", "fri"];
+  const templates = [];
 
-  const templates: {
-    name: string;
-    day: DayType;
-    time_start: string;
-    time_end: string;
-    live_lanes: number;
-    dry_lanes: number;
-  }[] = [];
-
-  // Mon-Fri: 2 sessions each (10 templates)
   for (const day of weekdays) {
     for (const session of DEFAULT_WEEKDAY_SESSIONS) {
       templates.push({
@@ -148,7 +144,6 @@ export async function seedDefaultTemplates() {
     }
   }
 
-  // Saturday: 2 sessions (2 templates)
   for (const session of DEFAULT_SATURDAY_SESSIONS) {
     templates.push({
       name: `${DAY_LABELS["sat"]} ${session.name}`,
@@ -163,7 +158,7 @@ export async function seedDefaultTemplates() {
   const admin = createAdminClient();
   const { error } = await admin.from("session_templates").insert(templates);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/templates");
   return { success: true, count: templates.length };

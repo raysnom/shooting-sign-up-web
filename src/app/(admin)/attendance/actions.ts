@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import type { AttendanceStatus } from "@/types/database";
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -47,6 +48,10 @@ export async function markAttendance(input: MarkAttendanceInput) {
   const { error: authError, userId } = await verifyExcoOrAbove();
   if (authError || !userId) return { error: authError };
 
+  if (!isValidUUID(input.memberId) || !isValidUUID(input.sessionId) || !isValidUUID(input.weekId)) {
+    return { error: "Invalid ID provided." };
+  }
+
   const admin = createAdminClient();
 
   // Check if an attendance record already exists for this allocation
@@ -75,7 +80,7 @@ export async function markAttendance(input: MarkAttendanceInput) {
       })
       .eq("id", existing.id);
 
-    if (error) return { error: error.message };
+    if (error) return { error: sanitizeDbError(error) };
   } else {
     const { error } = await admin.from("attendance").insert({
       member_id: input.memberId,
@@ -86,41 +91,15 @@ export async function markAttendance(input: MarkAttendanceInput) {
       marked_by: userId,
     });
 
-    if (error) return { error: error.message };
+    if (error) return { error: sanitizeDbError(error) };
   }
 
-  // Update no_show_count on the member
-  // Only increment if newly marking as absent/no_show and wasn't already
+  // Update no_show_count atomically to prevent race conditions
   if (isNewNoShow && !isOldNoShow) {
-    // Increment no_show_count by 1
-    const { data: member } = await admin
-      .from("members")
-      .select("no_show_count")
-      .eq("id", input.memberId)
-      .single();
-
-    if (member) {
-      await admin
-        .from("members")
-        .update({ no_show_count: member.no_show_count + 1 })
-        .eq("id", input.memberId);
-    }
+    await admin.rpc("increment_no_show_count", { member_id_input: input.memberId });
   }
-
-  // Decrement if changing FROM absent/no_show TO present/vr
   if (isOldNoShow && !isNewNoShow) {
-    const { data: member } = await admin
-      .from("members")
-      .select("no_show_count")
-      .eq("id", input.memberId)
-      .single();
-
-    if (member && member.no_show_count > 0) {
-      await admin
-        .from("members")
-        .update({ no_show_count: member.no_show_count - 1 })
-        .eq("id", input.memberId);
-    }
+    await admin.rpc("decrement_no_show_count", { member_id_input: input.memberId });
   }
 
   revalidatePath("/attendance");
@@ -140,6 +119,7 @@ type CreateSpecialEventInput = {
 export async function createSpecialEvent(input: CreateSpecialEventInput) {
   const { error: authError, userId } = await verifyExcoOrAbove();
   if (authError || !userId) return { error: authError };
+  if (!isValidUUID(input.weekId)) return { error: "Invalid week ID." };
 
   const admin = createAdminClient();
 
@@ -150,7 +130,7 @@ export async function createSpecialEvent(input: CreateSpecialEventInput) {
     created_by: userId,
   });
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/attendance");
   return { success: true };
@@ -159,6 +139,7 @@ export async function createSpecialEvent(input: CreateSpecialEventInput) {
 export async function deleteSpecialEvent(id: string) {
   const { error: authError, userId } = await verifyExcoOrAbove();
   if (authError || !userId) return { error: authError };
+  if (!isValidUUID(id)) return { error: "Invalid event ID." };
 
   const admin = createAdminClient();
 
@@ -167,7 +148,7 @@ export async function deleteSpecialEvent(id: string) {
     .delete()
     .eq("id", id);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/attendance");
   return { success: true };
@@ -183,6 +164,9 @@ export async function toggleSpecialEventAttendance(
 ) {
   const { error: authError, userId } = await verifyExcoOrAbove();
   if (authError || !userId) return { error: authError };
+  if (!isValidUUID(input.specialEventId) || !isValidUUID(input.memberId)) {
+    return { error: "Invalid ID provided." };
+  }
 
   const admin = createAdminClient();
 
@@ -201,7 +185,7 @@ export async function toggleSpecialEventAttendance(
       .delete()
       .eq("id", existing.id);
 
-    if (error) return { error: error.message };
+    if (error) return { error: sanitizeDbError(error) };
   } else {
     // Toggle on: insert
     const { error } = await admin.from("special_event_attendance").insert({
@@ -209,7 +193,7 @@ export async function toggleSpecialEventAttendance(
       member_id: input.memberId,
     });
 
-    if (error) return { error: error.message };
+    if (error) return { error: sanitizeDbError(error) };
   }
 
   revalidatePath("/attendance");

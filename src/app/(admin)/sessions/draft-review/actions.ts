@@ -3,12 +3,16 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
+import { logAudit } from "@/lib/utils/audit";
 
 // ──────────────────────────────────────────────
 // Auth helper
 // ──────────────────────────────────────────────
 
-async function verifyPresident() {
+async function verifyPresident(): Promise<
+  { error: string; userId: null } | { error: null; userId: string }
+> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -32,8 +36,11 @@ async function verifyPresident() {
 // ──────────────────────────────────────────────
 
 export async function publishWeek(weekId: string) {
-  const { error: authError } = await verifyPresident();
-  if (authError) return { error: authError };
+  const authResult = await verifyPresident();
+  if (authResult.error !== null) return { error: authResult.error };
+  const userId = authResult.userId;
+
+  if (!isValidUUID(weekId)) return { error: "Invalid week ID." };
 
   const admin = createAdminClient();
 
@@ -56,7 +63,9 @@ export async function publishWeek(weekId: string) {
     })
     .eq("id", weekId);
 
-  if (error) return { error: error.message };
+  if (error) return { error: sanitizeDbError(error) };
+
+  await logAudit("week.publish", userId, weekId);
 
   revalidatePath("/sessions");
   revalidatePath("/sessions/draft-review");
@@ -69,8 +78,11 @@ export async function publishWeek(weekId: string) {
 // ──────────────────────────────────────────────
 
 export async function rerunDraft(weekId: string) {
-  const { error: authError } = await verifyPresident();
-  if (authError) return { error: authError };
+  const authResult = await verifyPresident();
+  if (authResult.error !== null) return { error: authResult.error };
+  const userId = authResult.userId;
+
+  if (!isValidUUID(weekId)) return { error: "Invalid week ID." };
 
   const admin = createAdminClient();
 
@@ -91,7 +103,7 @@ export async function rerunDraft(weekId: string) {
     .delete()
     .eq("week_id", weekId);
 
-  if (allocError) return { error: `Failed to delete allocations: ${allocError.message}` };
+  if (allocError) return { error: sanitizeDbError(allocError) };
 
   // Delete all exco_duty assignments for this week
   const { error: excoError } = await admin
@@ -99,7 +111,7 @@ export async function rerunDraft(weekId: string) {
     .delete()
     .eq("week_id", weekId);
 
-  if (excoError) return { error: `Failed to delete exco duty: ${excoError.message}` };
+  if (excoError) return { error: sanitizeDbError(excoError) };
 
   // Reset week status to "closed"
   const { error: updateError } = await admin
@@ -107,7 +119,9 @@ export async function rerunDraft(weekId: string) {
     .update({ status: "closed", results_published_at: null })
     .eq("id", weekId);
 
-  if (updateError) return { error: updateError.message };
+  if (updateError) return { error: sanitizeDbError(updateError) };
+
+  await logAudit("draft.rerun", userId, weekId);
 
   revalidatePath("/sessions");
   revalidatePath("/sessions/draft-review");

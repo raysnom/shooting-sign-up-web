@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import type { Week, TeamType, LevelType } from "@/types/database";
 import { TEAM_LABELS } from "@/lib/constants";
@@ -39,11 +40,15 @@ export function ComplianceClient({
   week: Week;
   members: ComplianceMember[];
 }) {
-  const metCount = members.filter(
-    (m) => m.attendedSessions >= m.requiredSessions
-  ).length;
-  const totalCount = members.length;
-  const belowCount = totalCount - metCount;
+  const { metCount, totalCount, belowCount } = useMemo(() => {
+    const metCount = members.filter(
+      (m) => m.attendedSessions >= m.requiredSessions
+    ).length;
+    const totalCount = members.length;
+    const belowCount = totalCount - metCount;
+
+    return { metCount, totalCount, belowCount };
+  }, [members]);
 
   return (
     <div className="space-y-6">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const lastAttempt = useRef(0);
   const router = useRouter();
   const supabase = createClient();
 
@@ -28,13 +29,22 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
+    // Client-side throttle: 2 seconds between attempts
+    const now = Date.now();
+    if (now - lastAttempt.current < 2000) {
+      setError("Please wait before trying again.");
+      setLoading(false);
+      return;
+    }
+    lastAttempt.current = now;
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (error) {
-      setError(error.message);
+      setError("Invalid email or password.");
       setLoading(false);
       return;
     }

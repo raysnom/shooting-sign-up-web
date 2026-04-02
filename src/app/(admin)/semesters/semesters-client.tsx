@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import type { Semester } from "@/types/database";
 import { createSemester, deleteSemester, resetNoShowCounts } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -24,19 +24,26 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 
+const EMPTY_FORM = { name: "", start_date: "", end_date: "" };
+
+function formatDate(dateStr: string) {
+  return new Date(dateStr).toLocaleDateString("en-SG", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export function SemestersClient({ semesters }: { semesters: Semester[] }) {
   const [showCreate, setShowCreate] = useState(false);
   const [showReset, setShowReset] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageType, setMessageType] = useState<"error" | "success">("success");
+  const [deleteTarget, setDeleteTarget] = useState<Semester | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  const [form, setForm] = useState({
-    name: "",
-    start_date: "",
-    end_date: "",
-  });
-
-  async function handleCreate(e: React.FormEvent) {
+  const handleCreate = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage(null);
@@ -44,52 +51,67 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
     const result = await createSemester(form);
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
+      setMessageType("success");
       setMessage("Semester created successfully!");
-      setForm({ name: "", start_date: "", end_date: "" });
+      setTimeout(() => setMessage(null), 5000);
+      setForm(EMPTY_FORM);
       setShowCreate(false);
     }
     setLoading(false);
-  }
+  }, [form]);
 
-  async function handleDelete(id: string) {
-    if (!confirm("Are you sure you want to delete this semester?")) return;
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
     setLoading(true);
     setMessage(null);
+    setMessageType("success");
 
-    const result = await deleteSemester(id);
+    const result = await deleteSemester(deleteTarget.id);
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
+      setMessageType("success");
       setMessage("Semester deleted.");
+      setTimeout(() => setMessage(null), 5000);
     }
+    setDeleteTarget(null);
     setLoading(false);
-  }
+  }, [deleteTarget]);
 
-  async function handleResetNoShows() {
+  const handleResetNoShows = useCallback(async () => {
     setLoading(true);
     setMessage(null);
 
     const result = await resetNoShowCounts();
 
     if (result.error) {
-      setMessage(`Error: ${result.error}`);
+      setMessageType("error");
+      setMessage(result.error);
     } else {
+      setMessageType("success");
       setMessage("All no-show counts have been reset to 0.");
+      setTimeout(() => setMessage(null), 5000);
       setShowReset(false);
     }
     setLoading(false);
-  }
+  }, []);
 
-  function formatDate(dateStr: string) {
-    return new Date(dateStr).toLocaleDateString("en-SG", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  }
+  const handleFormChange = useCallback((field: keyof typeof form, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  const handleCloseCreate = useCallback(() => {
+    setShowCreate(false);
+  }, []);
+
+  const handleCloseReset = useCallback(() => {
+    setShowReset(false);
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -112,9 +134,7 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
                   <Label>Name</Label>
                   <Input
                     value={form.name}
-                    onChange={(e) =>
-                      setForm({ ...form, name: e.target.value })
-                    }
+                    onChange={(e) => handleFormChange("name", e.target.value)}
                     placeholder="e.g. Semester 1 2025"
                     required
                   />
@@ -125,9 +145,7 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
                     <Input
                       type="date"
                       value={form.start_date}
-                      onChange={(e) =>
-                        setForm({ ...form, start_date: e.target.value })
-                      }
+                      onChange={(e) => handleFormChange("start_date", e.target.value)}
                       required
                     />
                   </div>
@@ -136,9 +154,7 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
                     <Input
                       type="date"
                       value={form.end_date}
-                      onChange={(e) =>
-                        setForm({ ...form, end_date: e.target.value })
-                      }
+                      onChange={(e) => handleFormChange("end_date", e.target.value)}
                       required
                     />
                   </div>
@@ -166,7 +182,7 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
               <div className="flex gap-2 justify-end">
                 <Button
                   variant="outline"
-                  onClick={() => setShowReset(false)}
+                  onClick={handleCloseReset}
                   disabled={loading}
                 >
                   Cancel
@@ -185,13 +201,7 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
       </div>
 
       {message && (
-        <div
-          className={`rounded-md p-3 text-sm ${
-            message.startsWith("Error")
-              ? "bg-red-50 text-red-700"
-              : "bg-green-50 text-green-700"
-          }`}
-        >
+        <div className={`rounded-md p-3 text-sm ${messageType === "error" ? "bg-red-50 text-red-700" : "bg-green-50 text-green-700"}`}>
           {message}
         </div>
       )}
@@ -230,7 +240,7 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
                       variant="ghost"
                       size="sm"
                       className="text-red-600 hover:text-red-700"
-                      onClick={() => handleDelete(semester.id)}
+                      onClick={() => setDeleteTarget(semester)}
                       disabled={loading}
                     >
                       Delete
@@ -242,6 +252,23 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Semester</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete &quot;{deleteTarget?.name}&quot;? All weeks and sessions in this semester will also be deleted. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" disabled={loading} onClick={handleConfirmDelete}>
+              {loading ? "Deleting..." : "Delete Semester"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
