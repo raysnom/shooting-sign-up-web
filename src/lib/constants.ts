@@ -101,3 +101,20 @@ export const DIVISION_LABELS: Record<DivisionType, string> = {
 };
 
 export const DIVISIONS: DivisionType[] = ["A", "B", "C"];
+
+// ──────────────────────────────────────────────
+// Day ordering (used by sessions)
+// ──────────────────────────────────────────────
+
+import type { DayType } from "@/types/database";
+
+export const DAYS: DayType[] = ["mon", "tue", "wed", "thu", "fri", "sat"];
+
+export const DAY_ORDER: Record<DayType, number> = {
+  mon: 0,
+  tue: 1,
+  wed: 2,
+  thu: 3,
+  fri: 4,
+  sat: 5,
+};
