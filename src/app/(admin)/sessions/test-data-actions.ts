@@ -256,17 +256,21 @@ export async function clearTestData(weekId: string) {
 
   const admin = createAdminClient();
 
-  // Delete in order: attendance, allocations, exco_duty, preferences
-  await admin.from("attendance").delete().eq("week_id", weekId);
-  await admin.from("exco_duty").delete().eq("week_id", weekId);
-  await admin.from("allocations").delete().eq("week_id", weekId);
-  await admin.from("preferences").delete().eq("week_id", weekId);
+  try {
+    // Delete in order: attendance, allocations, exco_duty, preferences
+    await admin.from("attendance").delete().eq("week_id", weekId);
+    await admin.from("exco_duty").delete().eq("week_id", weekId);
+    await admin.from("allocations").delete().eq("week_id", weekId);
+    await admin.from("preferences").delete().eq("week_id", weekId);
 
-  // Reset week status back to "open"
-  await admin.from("weeks").update({ status: "open" }).eq("id", weekId);
+    // Reset week status back to "open"
+    await admin.from("weeks").update({ status: "open" }).eq("id", weekId);
 
-  revalidatePath("/sessions");
-  revalidatePath("/attendance");
+    revalidatePath("/sessions");
+    revalidatePath("/attendance");
 
-  return { success: true };
+    return { success: true };
+  } catch (err) {
+    return { error: `Clear failed: ${err instanceof Error ? err.message : "Unknown error"}` };
+  }
 }

@@ -88,6 +88,7 @@ export async function runDraft(weekId: string) {
     await admin.from("weeks").update({ status: "closed" as WeekStatus }).eq("id", weekId);
   }
 
+  try {
   // 3. Fetch all non-cancelled sessions for the week
   const { data: sessionsRaw, error: sessionsError } = await admin
     .from("sessions")
@@ -451,4 +452,10 @@ export async function runDraft(weekId: string) {
     allocations: draftResult.allocations.length,
     excoDuties: draftResult.excoDuties.length,
   };
+
+  } catch (err) {
+    await rollback();
+    console.error("Draft failed with unexpected error:", err);
+    return { error: `Draft failed: ${err instanceof Error ? err.message : "Unknown error"}` };
+  }
 }
