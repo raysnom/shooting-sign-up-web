@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useOptimistic, useTransition } from "react";
 import type { Week, Session, Preference, DayType } from "@/types/database";
 import { DAY_LABELS } from "@/lib/constants";
 import { submitPreferences } from "./actions";
@@ -87,6 +87,12 @@ export function PreferencesClient({
   const [rankedIds, setRankedIds] = useState<string[]>(initialRankedIds);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [, startSubmitTransition] = useTransition();
+
+  const [optimisticSavedCount, setOptimisticSavedCount] = useOptimistic(
+    initialRankedIds.length,
+    (_state, next: number) => next
+  );
 
   // Session lookup map
   const sessionMap = useMemo(() => {
@@ -168,15 +174,19 @@ export function PreferencesClient({
       rank: i + 1,
     }));
 
-    const result = await submitPreferences(week.id, rankings);
+    startSubmitTransition(async () => {
+      setOptimisticSavedCount(rankings.length);
 
-    if (result.error) {
-      setMessage(`Error: ${result.error}`);
-    } else {
-      setMessage("Preferences submitted successfully.");
-    }
-    setLoading(false);
-  }, [rankedIds, week.id]);
+      const result = await submitPreferences(week.id, rankings);
+
+      if (result.error) {
+        setMessage(`Error: ${result.error}`);
+      } else {
+        setMessage("Preferences submitted successfully.");
+      }
+      setLoading(false);
+    });
+  }, [rankedIds, week.id, setOptimisticSavedCount]);
 
   // ──────────────────────────────────────────────
   // Interactive view (with warning if deadline passed)
@@ -246,10 +256,10 @@ export function PreferencesClient({
             </div>
             <div>
               <span className="text-muted-foreground">Status: </span>
-              {rankedSessions.length > 0 ? (
+              {optimisticSavedCount > 0 ? (
                 <Badge variant="secondary">
-                  {rankedSessions.length}{" "}
-                  {rankedSessions.length === 1 ? "session" : "sessions"} ranked
+                  {optimisticSavedCount}{" "}
+                  {optimisticSavedCount === 1 ? "session" : "sessions"} saved
                 </Badge>
               ) : (
                 <Badge variant="outline">Not yet submitted</Badge>

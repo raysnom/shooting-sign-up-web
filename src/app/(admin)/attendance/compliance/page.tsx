@@ -60,30 +60,31 @@ export default async function CompliancePage({
     );
   }
 
-  // Fetch training requirements for this week
-  const { data: requirements } = await supabase
-    .from("training_requirements")
-    .select("*")
-    .eq("week_id", weekId);
-
-  // Fetch all attendance records for this week
-  const { data: attendanceRecords } = await supabase
-    .from("attendance")
-    .select("*")
-    .eq("week_id", weekId);
-
-  // Fetch all non-archived members
-  const { data: members } = await supabase
-    .from("members")
-    .select("*")
-    .eq("archived", false)
-    .order("name", { ascending: true });
-
-  // Fetch special events for this week
-  const { data: specialEventsData } = await supabase
-    .from("special_events")
-    .select("*")
-    .eq("week_id", weekId);
+  // Fetch requirements, attendance, members, and special events in parallel
+  const [
+    { data: requirements },
+    { data: attendanceRecords },
+    { data: members },
+    { data: specialEventsData },
+  ] = await Promise.all([
+    supabase
+      .from("training_requirements")
+      .select("*")
+      .eq("week_id", weekId),
+    supabase
+      .from("attendance")
+      .select("*")
+      .eq("week_id", weekId),
+    supabase
+      .from("members")
+      .select("*")
+      .eq("archived", false)
+      .order("name", { ascending: true }),
+    supabase
+      .from("special_events")
+      .select("*")
+      .eq("week_id", weekId),
+  ]);
 
   const typedSpecialEvents = (specialEventsData as SpecialEvent[]) ?? [];
   const specialEventIds = new Set(typedSpecialEvents.map((e) => e.id));

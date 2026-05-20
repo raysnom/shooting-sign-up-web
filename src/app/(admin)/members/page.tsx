@@ -1,17 +1,11 @@
 import { requireRole } from "@/lib/auth";
-import { createClient } from "@/lib/supabase/server";
-import type { Member } from "@/types/database";
+import { getCachedMembers } from "@/lib/cache";
 import { MembersClient } from "./members-client";
 
 export default async function MembersPage() {
   await requireRole(["president"]);
 
-  const supabase = await createClient();
-  const { data: members } = await supabase
-    .from("members")
-    .select("*")
-    .order("archived", { ascending: true })
-    .order("name", { ascending: true });
+  const members = await getCachedMembers();
 
-  return <MembersClient members={(members as Member[]) || []} />;
+  return <MembersClient members={members} />;
 }

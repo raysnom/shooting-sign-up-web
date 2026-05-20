@@ -31,22 +31,22 @@ export default async function PreferencesPage() {
     );
   }
 
-  // Fetch non-cancelled sessions for this week
-  const { data: sessions } = await supabase
-    .from("sessions")
-    .select("*")
-    .eq("week_id", openWeek.id)
-    .eq("is_cancelled", false)
-    .order("day", { ascending: true })
-    .order("time_start", { ascending: true });
-
-  // Fetch existing preferences for this member + week
-  const { data: preferences } = await supabase
-    .from("preferences")
-    .select("*")
-    .eq("member_id", member.id)
-    .eq("week_id", openWeek.id)
-    .order("rank", { ascending: true });
+  // Fetch sessions and existing preferences in parallel
+  const [{ data: sessions }, { data: preferences }] = await Promise.all([
+    supabase
+      .from("sessions")
+      .select("*")
+      .eq("week_id", openWeek.id)
+      .eq("is_cancelled", false)
+      .order("day", { ascending: true })
+      .order("time_start", { ascending: true }),
+    supabase
+      .from("preferences")
+      .select("*")
+      .eq("member_id", member.id)
+      .eq("week_id", openWeek.id)
+      .order("rank", { ascending: true }),
+  ]);
 
   // Check if deadline has passed (for warning banner, not blocking)
   const now = new Date();

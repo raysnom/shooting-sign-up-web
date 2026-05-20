@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import type { TrainingTargetType } from "@/types/database";
 import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
@@ -59,6 +59,7 @@ export async function createRequirement(input: CreateRequirementInput) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/requirements");
+  updateTag("requirements");
   return { success: true };
 }
 
@@ -84,6 +85,7 @@ export async function updateRequirement(
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/requirements");
+  updateTag("requirements");
   return { success: true };
 }
 
@@ -106,5 +108,6 @@ export async function deleteRequirement(id: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/requirements");
+  updateTag("requirements");
   return { success: true };
 }

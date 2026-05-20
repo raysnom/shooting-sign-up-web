@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import type { TeamType, LevelType, RoleType } from "@/types/database";
 import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 import { logAudit } from "@/lib/utils/audit";
@@ -101,6 +101,7 @@ export async function createMember(input: CreateMemberInput) {
   await logAudit("member.create", authResult.user.id, authUser.user.id, { email: input.email });
 
   revalidatePath("/members");
+  updateTag("members");
   return { success: true };
 }
 
@@ -210,6 +211,7 @@ export async function bulkUploadMembers(csvData: string) {
   await logAudit("member.bulk_upload", authResult.user.id, undefined, { count: results.filter(r => r.success).length });
 
   revalidatePath("/members");
+  updateTag("members");
   return {
     error: null,
     results,
@@ -239,5 +241,6 @@ export async function archiveMember(memberId: string) {
   await logAudit("member.archive", authResult.user.id, memberId);
 
   revalidatePath("/members");
+  updateTag("members");
   return { success: true };
 }

@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import type { RoleType } from "@/types/database";
 import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 import { logAudit } from "@/lib/utils/audit";
@@ -40,6 +40,7 @@ export async function promoteToExco(memberId: string) {
   await logAudit("role.promote", userId, memberId);
 
   revalidatePath("/handover");
+  updateTag("members");
   return { success: true };
 }
 
@@ -59,6 +60,7 @@ export async function demoteToMember(memberId: string) {
   await logAudit("role.demote", userId, memberId);
 
   revalidatePath("/handover");
+  updateTag("members");
   return { success: true };
 }
 
@@ -95,5 +97,6 @@ export async function transferPresidency(newPresidentId: string) {
   await logAudit("presidency.transfer", userId, newPresidentId);
 
   revalidatePath("/handover");
+  updateTag("members");
   return { success: true };
 }

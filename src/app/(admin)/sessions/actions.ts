@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import type { WeekStatus } from "@/types/database";
 import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
@@ -71,6 +71,7 @@ export async function createWeek(input: CreateWeekInput) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
+  updateTag("weeks");
   return { success: true };
 }
 
@@ -113,6 +114,7 @@ export async function generateSessionsFromTemplates(weekId: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
+  updateTag("sessions");
   return { success: true, count: sessions.length };
 }
 
@@ -143,6 +145,7 @@ export async function updateSession(sessionId: string, updates: UpdateSessionInp
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
+  updateTag("sessions");
   return { success: true };
 }
 
@@ -164,6 +167,7 @@ export async function cancelSession(sessionId: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
+  updateTag("sessions");
   return { success: true };
 }
 
@@ -185,6 +189,7 @@ export async function uncancelSession(sessionId: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
+  updateTag("sessions");
   return { success: true };
 }
 
@@ -206,6 +211,8 @@ export async function deleteWeek(weekId: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
+  updateTag("weeks");
+  updateTag("sessions");
   return { success: true };
 }
 
@@ -227,5 +234,6 @@ export async function updateWeekStatus(weekId: string, status: WeekStatus) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/sessions");
+  updateTag("weeks");
   return { success: true };
 }

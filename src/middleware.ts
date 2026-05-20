@@ -25,9 +25,11 @@ export async function middleware(request: NextRequest) {
     }
   );
 
+  // Use getSession() for a fast local JWT check (no network round-trip).
+  // Actual server-side validation happens in getCurrentUser() on each page.
   const {
-    data: { user },
-  } = await supabase.auth.getUser();
+    data: { session },
+  } = await supabase.auth.getSession();
 
   const { pathname } = request.nextUrl;
 
@@ -38,14 +40,14 @@ export async function middleware(request: NextRequest) {
   );
 
   // If not authenticated and trying to access a protected route, redirect to login
-  if (!user && !isPublicRoute) {
+  if (!session && !isPublicRoute) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
   // If authenticated and trying to access login, redirect to schedule
-  if (user && pathname === "/login") {
+  if (session && pathname === "/login") {
     const url = request.nextUrl.clone();
     url.pathname = "/schedule";
     return NextResponse.redirect(url);

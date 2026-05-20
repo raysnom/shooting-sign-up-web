@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useTransition, useMemo, useCallback } from "react";
+import { Fragment, useState, useTransition, useMemo, useCallback, useOptimistic } from "react";
 import type { Week, Session, ExcoDuty, DayType } from "@/types/database";
 import type { AllocationWithSession, AllocationWithSessionAndMember } from "./page";
 import { DAY_LABELS, TEAM_LABELS } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 import { cancelAllocation, submitAbsenceReason } from "./actions";
 
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -55,6 +61,35 @@ function formatTime(timeStr: string) {
   const ampm = hour >= 12 ? "PM" : "AM";
   const displayHour = hour % 12 || 12;
   return `${displayHour}:${m} ${ampm}`;
+}
+
+type Timing = { timeStart: string; timeEnd: string };
+
+function sameTiming(a?: Timing, b?: Timing) {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return a.timeStart === b.timeStart && a.timeEnd === b.timeEnd;
+}
+
+function buildHeaderSegments(
+  columns: { day: DayType }[],
+  timingByDay: Partial<Record<DayType, Timing>>
+) {
+  const segments: Array<{ key: string; span: number; timing?: Timing }> = [];
+  let i = 0;
+  while (i < columns.length) {
+    const col = columns[i];
+    const timing = timingByDay[col.day];
+    let span = 1;
+    while (i + span < columns.length) {
+      const next = timingByDay[columns[i + span].day];
+      if (!sameTiming(timing, next)) break;
+      span++;
+    }
+    segments.push({ key: col.day, span, timing });
+    i += span;
+  }
+  return segments;
 }
 
 function groupByDay(allocations: AllocationWithSession[]) {
@@ -104,6 +139,11 @@ export function ScheduleClient({
   const [messageType, setMessageType] = useState<"error" | "success">("success");
   const [isPending, startTransition] = useTransition();
 
+  const [optimisticAllocations, removeOptimisticAllocation] = useOptimistic(
+    allocations,
+    (state, cancelledId: string) => state.filter((a) => a.id !== cancelledId)
+  );
+
   // Cancel confirmation dialog state
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
 
@@ -118,24 +158,11 @@ export function ScheduleClient({
     [excoDuties]
   );
 
-  const grouped = useMemo(() => groupByDay(allocations), [allocations]);
+  const grouped = useMemo(() => groupByDay(optimisticAllocations), [optimisticAllocations]);
 
   const orderedDays = useMemo(
     () => DAY_ORDER.filter((d) => grouped[d] !== undefined),
     [grouped]
-  );
-
-  // Group sessions by day for the full schedule view
-  const sessionsByDay = useMemo(
-    () =>
-      DAY_ORDER.map((day) => ({
-        day,
-        label: DAY_LABELS[day] ?? day,
-        sessions: sessions
-          .filter((s) => s.day === day)
-          .sort((a, b) => a.time_start.localeCompare(b.time_start)),
-      })).filter((g) => g.sessions.length > 0),
-    [sessions]
   );
 
   // Build a map: session_id -> allocations for that session
@@ -149,12 +176,91 @@ export function ScheduleClient({
     return map;
   }, [allAllocations]);
 
+  // Week-day columns for the full-schedule grid: only days that have sessions
+  const weekDayColumns = useMemo(() => {
+    const start = new Date(week.start_date + "T00:00:00");
+    const daysWithSessions = new Set(sessions.map((s) => s.day));
+    return DAY_ORDER.filter((day) => daysWithSessions.has(day)).map((day) => {
+      const offset = DAY_ORDER.indexOf(day);
+      const d = new Date(start);
+      d.setDate(d.getDate() + offset);
+      return {
+        day,
+        label: DAY_LABELS[day] ?? day,
+        dateLabel: `${d.getDate()}/${d.getMonth() + 1}`,
+      };
+    });
+  }, [week.start_date, sessions]);
+
+  // Sessions grouped by ordinal position within each day (1st session of
+  // the day, 2nd session of the day, etc.) so Saturday-only timings line up
+  // with the corresponding weekday sessions. Distinct timings within a row
+  // are surfaced in the grey header.
+  const timeSlots = useMemo(() => {
+    // Per-day, sessions sorted by start time
+    const sessionsByDay = new Map<DayType, Session[]>();
+    for (const session of sessions) {
+      const list = sessionsByDay.get(session.day) || [];
+      list.push(session);
+      sessionsByDay.set(session.day, list);
+    }
+    for (const list of sessionsByDay.values()) {
+      list.sort((a, b) => a.time_start.localeCompare(b.time_start));
+    }
+
+    const maxOrdinal = Math.max(
+      0,
+      ...Array.from(sessionsByDay.values()).map((arr) => arr.length)
+    );
+
+    const slots = [];
+    for (let i = 0; i < maxOrdinal; i++) {
+      const cellsByDay: Partial<
+        Record<DayType, AllocationWithSessionAndMember[]>
+      > = {};
+      const timingByDay: Partial<
+        Record<DayType, { timeStart: string; timeEnd: string }>
+      > = {};
+
+      for (const day of DAY_ORDER) {
+        const daySessions = sessionsByDay.get(day);
+        const session = daySessions?.[i];
+        if (!session) continue;
+
+        const allocs = allocationsBySession.get(session.id) || [];
+        const sorted = [...allocs].sort((a, b) => {
+          if (a.type !== b.type) return a.type === "live" ? -1 : 1;
+          return a.members.name.localeCompare(b.members.name);
+        });
+        cellsByDay[day] = sorted;
+        timingByDay[day] = {
+          timeStart: session.time_start,
+          timeEnd: session.time_end,
+        };
+      }
+
+      slots.push({
+        key: `slot-${i}`,
+        ordinal: i + 1,
+        timingByDay,
+        cellsByDay,
+        maxRows: Math.max(
+          0,
+          ...Object.values(cellsByDay).map((arr) => arr?.length ?? 0)
+        ),
+      });
+    }
+
+    return slots;
+  }, [sessions, allocationsBySession]);
+
   const handleCancel = useCallback(
     (allocationId: string) => {
       setMessage(null);
       setCancellingId(allocationId);
 
       startTransition(async () => {
+        removeOptimisticAllocation(allocationId);
         const result = await cancelAllocation(allocationId);
         if (result.error) {
           setMessageType("error");
@@ -168,7 +274,7 @@ export function ScheduleClient({
         setCancelTarget(null);
       });
     },
-    [startTransition]
+    [startTransition, removeOptimisticAllocation]
   );
 
   const openReasonDialog = useCallback((allocationId: string) => {
@@ -207,11 +313,22 @@ export function ScheduleClient({
             {formatDate(week.end_date)}
           </h1>
         </div>
-        <Badge
-          variant={week.status === "published" ? "default" : "secondary"}
-        >
-          {week.status === "published" ? "Published" : "Drafted"}
-        </Badge>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Badge
+                variant={week.status === "published" ? "default" : "secondary"}
+              >
+                {week.status === "published" ? "Published" : "Drafted"}
+              </Badge>
+            }
+          />
+          <TooltipContent>
+            {week.status === "published"
+              ? "Allocations are final. You can cancel slots up to 24 hours before each session."
+              : "Allocations are a draft and may still change before publication."}
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       <Separator />
@@ -316,7 +433,7 @@ export function ScheduleClient({
         {/* ── My Schedule Tab ── */}
         <TabsContent value="my-schedule">
           <div className="space-y-6">
-            {allocations.length === 0 && (
+            {optimisticAllocations.length === 0 && (
               <div className="rounded-md border bg-white p-8 text-center text-gray-500">
                 <p className="text-lg font-medium">
                   You have no allocated sessions this week.
@@ -415,119 +532,129 @@ export function ScheduleClient({
 
         {/* ── Full Schedule Tab ── */}
         <TabsContent value="full-schedule">
-          <div className="space-y-6">
-            {sessionsByDay.length === 0 && (
-              <div className="rounded-md border bg-white p-8 text-center text-gray-500">
-                <p className="text-lg font-medium">No sessions this week.</p>
-              </div>
-            )}
-
-            {sessionsByDay.map((group) => (
-              <div key={group.day}>
-                <h2 className="mb-3 text-lg font-semibold">{group.label}</h2>
-                <div className="space-y-4">
-                  {group.sessions.map((session) => {
-                    const sessionAllocs =
-                      allocationsBySession.get(session.id) || [];
-                    const liveAllocs = sessionAllocs
-                      .filter((a) => a.type === "live")
-                      .sort((a, b) => a.members.name.localeCompare(b.members.name));
-                    const dryAllocs = sessionAllocs
-                      .filter((a) => a.type === "dry")
-                      .sort((a, b) => a.members.name.localeCompare(b.members.name));
-
-                    return (
-                      <Card key={session.id}>
-                        <CardHeader>
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <CardTitle>{session.name}</CardTitle>
-                              <CardDescription>
-                                {formatTime(session.time_start)} &ndash;{" "}
-                                {formatTime(session.time_end)}
-                              </CardDescription>
-                            </div>
-                            <div className="flex gap-2">
-                              <Badge className="bg-green-600 text-white">
-                                {liveAllocs.length} Live
-                              </Badge>
-                              <Badge variant="secondary" className="bg-blue-100 text-blue-700">
-                                {dryAllocs.length} Dry
-                              </Badge>
-                            </div>
+          {timeSlots.length === 0 || weekDayColumns.length === 0 ? (
+            <div className="rounded-md border bg-white p-8 text-center text-gray-500">
+              <p className="text-lg font-medium">No sessions this week.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Live fire allocations are bold; dry fire allocations are shown
+                in italic grey.
+              </p>
+              <div className="overflow-x-auto rounded-md border bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      {weekDayColumns.map((col) => (
+                        <TableHead
+                          key={col.day}
+                          className="text-center align-bottom"
+                        >
+                          <div className="text-sm font-semibold uppercase tracking-wide">
+                            {col.label}
                           </div>
-                        </CardHeader>
-                        <CardContent>
-                          {sessionAllocs.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">
-                              No members allocated to this session.
-                            </p>
-                          ) : (
-                            <div className="rounded-md border">
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>Name</TableHead>
-                                    <TableHead>Team</TableHead>
-                                    <TableHead>Type</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {[...liveAllocs, ...dryAllocs].map((alloc) => {
-                                    const isMe =
-                                      alloc.member_id === currentMemberId;
+                          <div className="text-xs font-normal text-muted-foreground">
+                            {col.dateLabel}
+                          </div>
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {timeSlots.map((slot) => {
+                      const segments = buildHeaderSegments(
+                        weekDayColumns,
+                        slot.timingByDay
+                      );
+                      return (
+                      <Fragment key={slot.key}>
+                        <TableRow className="bg-muted/60 hover:bg-muted/60">
+                          {segments.map((seg, idx) => {
+                            const timeLabel = seg.timing
+                              ? `${formatTime(seg.timing.timeStart)} – ${formatTime(seg.timing.timeEnd)}`
+                              : "";
+                            return (
+                              <TableCell
+                                key={seg.key}
+                                colSpan={seg.span}
+                                className="font-semibold text-center"
+                              >
+                                {idx === 0 ? (
+                                  <>
+                                    Session {slot.ordinal}
+                                    {timeLabel && ` (${timeLabel})`}
+                                  </>
+                                ) : (
+                                  timeLabel
+                                )}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                        {slot.maxRows === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={weekDayColumns.length}
+                              className="text-center text-xs text-muted-foreground"
+                            >
+                              No members allocated.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          Array.from({ length: slot.maxRows }).map(
+                            (_, rowIdx) => (
+                              <TableRow key={rowIdx}>
+                                {weekDayColumns.map((col) => {
+                                  const alloc =
+                                    slot.cellsByDay[col.day]?.[rowIdx];
+                                  if (!alloc) {
                                     return (
-                                      <TableRow
-                                        key={alloc.id}
-                                        className={
-                                          isMe ? "bg-blue-50" : undefined
-                                        }
-                                      >
-                                        <TableCell className="font-medium">
-                                          {alloc.members.name}
-                                          {isMe && (
-                                            <span className="ml-2 text-xs text-blue-600">
-                                              (You)
-                                            </span>
-                                          )}
-                                        </TableCell>
-                                        <TableCell>
-                                          {TEAM_LABELS[alloc.members.team] ??
-                                            alloc.members.team}
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge
-                                            variant={
-                                              alloc.type === "live"
-                                                ? "default"
-                                                : "secondary"
-                                            }
-                                            className={
-                                              alloc.type === "live"
-                                                ? "bg-green-600 text-white"
-                                                : "bg-blue-100 text-blue-700"
-                                            }
-                                          >
-                                            {alloc.type === "live"
-                                              ? "Live Fire"
-                                              : "Dry Fire"}
-                                          </Badge>
-                                        </TableCell>
-                                      </TableRow>
+                                      <TableCell
+                                        key={col.day}
+                                        className="align-top"
+                                      />
                                     );
-                                  })}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
+                                  }
+                                  const isMe =
+                                    alloc.member_id === currentMemberId;
+                                  const isLive = alloc.type === "live";
+                                  return (
+                                    <TableCell
+                                      key={col.day}
+                                      className={cn(
+                                        "align-top whitespace-nowrap",
+                                        isLive
+                                          ? "font-medium"
+                                          : "italic text-muted-foreground",
+                                        isMe && "bg-blue-50"
+                                      )}
+                                      title={`${
+                                        TEAM_LABELS[alloc.members.team] ??
+                                        alloc.members.team
+                                      } — ${isLive ? "Live Fire" : "Dry Fire"}`}
+                                    >
+                                      {alloc.members.name}
+                                      {isMe && (
+                                        <span className="ml-1 text-xs text-blue-600">
+                                          (you)
+                                        </span>
+                                      )}
+                                    </TableCell>
+                                  );
+                                })}
+                              </TableRow>
+                            )
+                          )
+                        )}
+                      </Fragment>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

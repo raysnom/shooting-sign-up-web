@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import type { DayType } from "@/types/database";
 import {
   DEFAULT_WEEKDAY_SESSIONS,
@@ -64,6 +64,7 @@ export async function createTemplate(input: CreateTemplateInput) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/templates");
+  updateTag("templates");
   return { success: true };
 }
 
@@ -95,6 +96,7 @@ export async function updateTemplate(id: string, updates: UpdateTemplateInput) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/templates");
+  updateTag("templates");
   return { success: true };
 }
 
@@ -117,6 +119,7 @@ export async function deleteTemplate(id: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/templates");
+  updateTag("templates");
   return { success: true };
 }
 
@@ -161,5 +164,6 @@ export async function seedDefaultTemplates() {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/templates");
+  updateTag("templates");
   return { success: true, count: templates.length };
 }

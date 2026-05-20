@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import type { GunTypeEnum } from "@/types/database";
 import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
@@ -50,6 +50,8 @@ export async function createGun(input: GunInput) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/guns");
+  updateTag("guns");
+  updateTag("members");
   return {};
 }
 
@@ -71,6 +73,8 @@ export async function updateGun(id: string, data: GunInput) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/guns");
+  updateTag("guns");
+  updateTag("members");
   return {};
 }
 
@@ -89,6 +93,8 @@ export async function deleteGun(id: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/guns");
+  updateTag("guns");
+  updateTag("members");
   return {};
 }
 
@@ -133,6 +139,8 @@ export async function assignGunToMember(
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/guns");
+  updateTag("guns");
+  updateTag("members");
   return {};
 }
 
@@ -287,5 +295,7 @@ export async function bulkImportGuns(
   }
 
   revalidatePath("/guns");
+  updateTag("guns");
+  updateTag("members");
   return { error: null, results };
 }

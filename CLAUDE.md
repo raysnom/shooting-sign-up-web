@@ -16,7 +16,7 @@
 | Styling      | Tailwind CSS v4 + shadcn/ui v4 (Base UI) |
 | Deployment   | Vercel                         |
 | Notifications| Supabase Edge Functions + email (Resend or Supabase built-in) |
-
+   
 ### Important Version Notes
 - **Next.js 16** — Uses App Router (not Pages Router)
 - **Tailwind v4** — CSS-based config (`@import "tailwindcss"` in globals.css), not `tailwind.config.js`
@@ -37,15 +37,18 @@ shooting-sign-up-web/
 ├── src/
 │   ├── app/                       # Next.js App Router pages
 │   │   ├── (auth)/                # Login / invite / password reset
+│   │   │   ├── loading.tsx        # Skeleton shown while route loads
 │   │   │   ├── login/
 │   │   │   └── set-password/
 │   │   ├── (dashboard)/           # Authenticated routes (members)
-│   │   │   ├── schedule/          # View weekly schedule
+│   │   │   ├── loading.tsx        # Default skeleton for dashboard routes
+│   │   │   ├── schedule/          # View weekly schedule (+ loading.tsx)
 │   │   │   ├── preferences/       # Submit slot preferences
-│   │   │   ├── profile/           # View attendance & score
+│   │   │   ├── profile/           # View attendance & score (+ loading.tsx)
 │   │   │   └── cancel/            # Cancel a slot
 │   │   ├── (admin)/               # EXCO & President routes
-│   │   │   ├── attendance/        # Mark attendance
+│   │   │   ├── loading.tsx        # Default skeleton for admin routes
+│   │   │   ├── attendance/        # Mark attendance (+ loading.tsx)
 │   │   │   │   └── compliance/    # End-of-week compliance report
 │   │   │   ├── guns/              # Manage gun assignments
 │   │   │   ├── sessions/          # Manage sessions, templates, draft
@@ -55,10 +58,10 @@ shooting-sign-up-web/
 │   │   │   ├── competition/       # Set competition flags
 │   │   │   ├── requirements/      # Set training requirements
 │   │   │   └── handover/          # Promote to EXCO, transfer presidency
-│   │   ├── layout.tsx
+│   │   ├── layout.tsx             # Wraps app in TooltipProvider
 │   │   └── page.tsx               # Landing / redirect to login or dashboard
 │   ├── components/
-│   │   ├── ui/                    # shadcn/ui primitives
+│   │   ├── ui/                    # shadcn/ui primitives (incl. skeleton, tooltip)
 │   │   └── nav/                   # Navigation components
 │   ├── lib/
 │   │   ├── supabase/
@@ -71,6 +74,7 @@ shooting-sign-up-web/
 │   │   │   ├── gun-clash.ts       # Gun clash resolution
 │   │   │   └── exco-duty.ts       # Random EXCO duty assignment
 │   │   ├── auth.ts                # getCurrentUser(), requireRole()
+│   │   ├── cache.ts               # Tagged unstable_cache helpers for stable admin reads
 │   │   ├── utils.ts               # cn() utility
 │   │   ├── utils/
 │   │   │   └── datetime.ts        # Date/time formatting (DD/MM/YY, SGT)
@@ -166,6 +170,31 @@ Open [http://localhost:3000](http://localhost:3000) to see the app.
 - **Pure functions** — Algorithm code in `src/lib/algorithm/` must be pure (no side effects, no database calls)
 - **Data is passed in** — Fetch data separately and pass it to algorithm functions
 - **Testable** — Pure functions make unit testing easy
+
+### Performance & UX Patterns
+
+These primitives are already in place. Reuse them — don't re-roll inline versions.
+
+#### Skeleton loaders
+- Use `Skeleton` from `@/components/ui/skeleton`. Never inline a `<div className="animate-pulse bg-gray-200" />`.
+- Each route group has a default `loading.tsx`. Slow pages get their own (`profile/loading.tsx`, `schedule/loading.tsx`, `attendance/loading.tsx`). Add one for any new page whose server component fans out to 3+ Supabase queries.
+- Match the skeleton shape to the real page layout (header + cards + table rows) so the swap doesn't jar.
+
+#### Caching admin reads
+- For **relatively static admin tables** (semesters, weeks, sessions, templates, members, guns, groups, requirements), use the tagged helpers in `src/lib/cache.ts` instead of `await supabase.from(...).select(...)` in the page.
+- These wrap Supabase calls in `unstable_cache` (5-min TTL) using the service-role admin client — safe because access control happens before the cache call (via `requireRole`).
+- After any mutation that affects a cached tag, the matching `actions.ts` must call `updateTag("<tag>")` alongside `revalidatePath(...)`. Next.js 16 renamed `revalidateTag` to `updateTag` inside Server Actions.
+- **Do NOT cache** user-scoped data (schedule, profile, preferences, attendance). The cache key would either leak data across users or thrash on every request.
+
+#### Optimistic UI
+- For mutations the user expects to feel instant (cancel, toggle, mark, save), wrap the affected state in `useOptimistic` and dispatch the optimistic update inside the existing `startTransition`. React rolls it back automatically if the action throws.
+- Real examples in the codebase: `schedule-client.tsx` (cancel allocation), `attendance-client.tsx` (mark attendance, toggle special-event attendance), `preferences-client.tsx` (saved-count badge).
+- **Skip optimistic UI** on slow, multi-step server-validated operations (draft publish, bulk member upload) — premature success is worse than a spinner.
+
+#### Tooltips
+- `TooltipProvider` is mounted once in the root layout. Compose `Tooltip` / `TooltipTrigger` / `TooltipContent` from `@/components/ui/tooltip` anywhere.
+- `TooltipTrigger` uses Base UI's `render` prop (no `asChild`): `<TooltipTrigger render={<Badge ...>X</Badge>} />`.
+- Only add tooltips where the label is non-obvious — score factor abbreviations, status badges, icon-only buttons, role descriptions. Not on every button.
 
 ---
 

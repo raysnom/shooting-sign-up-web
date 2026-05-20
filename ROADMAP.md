@@ -81,7 +81,7 @@
 - [x] Build draft review page with publish/re-run controls
 - [x] Build member schedule view with gun clash warnings (yellow banner)
 - [x] Show priority score breakdown on member profile page
-- [ ] Email notifications (Supabase Edge Function `send-schedule`) — **deferred to Phase 7**
+- [~] Email notifications — **descoped** (members will check the website directly)
 
 ---
 
@@ -104,12 +104,18 @@
 
 ### Polish Tasks
 - [ ] Responsive design pass — ensure mobile-friendly for students on phones
-- [ ] Error handling and loading states across all pages
+- [x] Loading states — shared `Skeleton` component, route-group `loading.tsx` files for `(auth)`, `(dashboard)`, `(admin)`, plus page-specific loaders for `/profile`, `/schedule`, `/attendance`
+- [x] Caching — tagged `unstable_cache` helpers in `src/lib/cache.ts` for stable admin reads; `updateTag()` invalidation in admin server actions
+- [x] Optimistic UI — `useOptimistic` on cancel allocation, attendance marking, special-event toggling, preferences submit
+- [x] Tooltips — Base UI tooltip in `src/components/ui/tooltip.tsx`, applied to priority score factors and status badges
+- [ ] Error handling improvements — replace remaining technical errors with user-friendly messages
 - [ ] Bulk attendance upload (historical data)
-- [ ] Email notifications (Supabase Edge Function `send-schedule`)
-  - [ ] Build Edge Function to send schedule emails
-  - [ ] Set up email service (Resend or Supabase built-in)
-  - [ ] Template email with member's weekly schedule
+- [~] Email notifications — **descoped**, members check the website directly
+
+### Member Onboarding & Instructions
+- [ ] Write member-facing usage instructions (how to log in, set password, submit preferences, view schedule, cancel a slot, mark VR)
+- [ ] Add a prompt/banner asking members to **verify their email address is correct** on first login
+- [ ] Decide format: in-app help page (e.g. `/help`) vs. printable PDF vs. shared doc — pick one and link from sidebar
 
 ### Deployment Tasks
 - [ ] Set up Vercel project
@@ -151,7 +157,8 @@ Ideas for future iterations:
 - [ ] **RLS on members table temporarily disabled** — Need to re-enable after testing. Run: `ALTER TABLE public.members ENABLE ROW LEVEL SECURITY;`
 
 ### Medium Priority
-- [ ] **No loading states on draft run** — Add skeleton loaders and progress indicators
+- [x] **No loading states** — Added shared `Skeleton` component and per-route `loading.tsx` files
+- [ ] **No loading state on draft run** — Long-running draft action still needs a progress indicator
 - [ ] **Error messages not user-friendly** — Replace technical errors with clear user guidance
 - [ ] **No pagination on member list** — Will be slow with >100 members
 
@@ -178,9 +185,10 @@ Ideas for future iterations:
 
 ## Next Steps
 
-1. **Re-enable RLS on members table** — Critical security fix
-2. **Responsive design pass** — Test on mobile devices
-3. **Set up Vercel deployment** — Configure production environment
-4. **End-to-end testing** — Full user flow from preference submission to schedule publication
-5. **User acceptance testing** — Get feedback from actual club members
-6. **Production launch** — Deploy and monitor first live draft cycle
+1. **End-to-end testing** — Full user flow from preference submission to schedule publication (current focus)
+2. **Write member usage instructions** — Including "verify your email" step on first login
+3. **Re-enable RLS on members table** — Critical security fix
+4. **Responsive design pass** — Test on mobile devices
+5. **Set up Vercel deployment** — Configure production environment
+6. **User acceptance testing** — Get feedback from actual club members
+7. **Production launch** — Deploy and monitor first live draft cycle

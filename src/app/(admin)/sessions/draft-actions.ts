@@ -84,6 +84,18 @@ export async function runDraft(weekId: string) {
     .single();
 
   if (lockError || !locked) {
+    console.error("[runDraft] Lock failed", {
+      weekId,
+      prevReadStatus: week.status,
+      lockError,
+      locked,
+    });
+    const { data: currentRow } = await admin
+      .from("weeks")
+      .select("id, status")
+      .eq("id", weekId)
+      .single();
+    console.error("[runDraft] Actual DB state after lock fail:", currentRow);
     return { error: "Draft is already in progress for this week." };
   }
 

@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 
 async function verifyPresident() {
@@ -37,6 +37,7 @@ export async function createGroup(name: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/groups");
+  updateTag("groups");
   return { success: true };
 }
 
@@ -55,6 +56,7 @@ export async function deleteGroup(id: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/groups");
+  updateTag("groups");
   return { success: true };
 }
 
@@ -74,6 +76,7 @@ export async function addGroupMember(groupId: string, memberId: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/groups");
+  updateTag("groups");
   return { success: true };
 }
 
@@ -92,5 +95,6 @@ export async function removeGroupMember(id: string) {
   if (error) return { error: sanitizeDbError(error) };
 
   revalidatePath("/groups");
+  updateTag("groups");
   return { success: true };
 }

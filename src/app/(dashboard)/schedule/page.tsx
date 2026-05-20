@@ -76,35 +76,36 @@ export default async function SchedulePage() {
     );
   }
 
-  // ── 3. Fetch allocations for this member + week (with session details) ──
-  const { data: allocations } = await supabase
-    .from("allocations")
-    .select("*, sessions(*)")
-    .eq("member_id", member.id)
-    .eq("week_id", activeWeek.id)
-    .eq("cancelled", false);
-
-  // ── 4. Fetch ALL allocations for the week (with member names + session details) ──
-  const { data: allAllocations } = await supabase
-    .from("allocations")
-    .select("*, sessions(*), members(id, name, team)")
-    .eq("week_id", activeWeek.id)
-    .eq("cancelled", false);
-
-  // ── 5. Fetch all sessions for the week ──
-  const { data: sessions } = await supabase
-    .from("sessions")
-    .select("*")
-    .eq("week_id", activeWeek.id)
-    .eq("is_cancelled", false)
-    .order("time_start", { ascending: true });
-
-  // ── 6. Fetch EXCO duty for this member + week ──
-  const { data: excoDuties } = await supabase
-    .from("exco_duty")
-    .select("*")
-    .eq("member_id", member.id)
-    .eq("week_id", activeWeek.id);
+  // ── 3-6. Fetch allocations, sessions, and EXCO duties in parallel ──
+  const [
+    { data: allocations },
+    { data: allAllocations },
+    { data: sessions },
+    { data: excoDuties },
+  ] = await Promise.all([
+    supabase
+      .from("allocations")
+      .select("*, sessions(*)")
+      .eq("member_id", member.id)
+      .eq("week_id", activeWeek.id)
+      .eq("cancelled", false),
+    supabase
+      .from("allocations")
+      .select("*, sessions(*), members(id, name, team)")
+      .eq("week_id", activeWeek.id)
+      .eq("cancelled", false),
+    supabase
+      .from("sessions")
+      .select("*")
+      .eq("week_id", activeWeek.id)
+      .eq("is_cancelled", false)
+      .order("time_start", { ascending: true }),
+    supabase
+      .from("exco_duty")
+      .select("*")
+      .eq("member_id", member.id)
+      .eq("week_id", activeWeek.id),
+  ]);
 
   return (
     <ScheduleClient

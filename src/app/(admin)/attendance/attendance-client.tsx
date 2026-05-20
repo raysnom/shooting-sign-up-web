@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useOptimistic, useTransition } from "react";
 import Link from "next/link";
 import type {
   Week,
@@ -124,6 +124,73 @@ export function AttendanceClient({
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageType, setMessageType] = useState<"error" | "success">("success");
+  const [, startAttendanceTransition] = useTransition();
+  const [, startEventAttendanceTransition] = useTransition();
+
+  type OptimisticAttendance = {
+    member_id: string;
+    session_id: string;
+    week_id: string;
+    status: AttendanceStatus;
+    reason: string | null;
+  };
+
+  const [optimisticAttendance, applyOptimisticAttendance] = useOptimistic(
+    attendanceRecords,
+    (state, update: OptimisticAttendance) => {
+      const idx = state.findIndex(
+        (r) =>
+          r.member_id === update.member_id &&
+          r.session_id === update.session_id &&
+          r.week_id === update.week_id
+      );
+      const next: Attendance = {
+        id: idx >= 0 ? state[idx].id : `optimistic-${update.member_id}-${update.session_id}`,
+        member_id: update.member_id,
+        session_id: update.session_id,
+        week_id: update.week_id,
+        status: update.status,
+        reason: update.reason,
+        marked_by: idx >= 0 ? state[idx].marked_by : null,
+        created_at: idx >= 0 ? state[idx].created_at : new Date().toISOString(),
+      };
+      if (idx >= 0) {
+        const copy = [...state];
+        copy[idx] = next;
+        return copy;
+      }
+      return [...state, next];
+    }
+  );
+
+  type OptimisticEventAttendanceAction = {
+    special_event_id: string;
+    member_id: string;
+  };
+
+  const [optimisticEventAttendance, toggleOptimisticEventAttendance] =
+    useOptimistic(
+      specialEventAttendance,
+      (state, action: OptimisticEventAttendanceAction) => {
+        const idx = state.findIndex(
+          (sa) =>
+            sa.special_event_id === action.special_event_id &&
+            sa.member_id === action.member_id
+        );
+        if (idx >= 0) {
+          return state.filter((_, i) => i !== idx);
+        }
+        return [
+          ...state,
+          {
+            id: `optimistic-${action.special_event_id}-${action.member_id}`,
+            special_event_id: action.special_event_id,
+            member_id: action.member_id,
+            created_at: new Date().toISOString(),
+          },
+        ];
+      }
+    );
 
   // VR dialog state
   const [vrDialogOpen, setVrDialogOpen] = useState(false);
@@ -150,12 +217,12 @@ export function AttendanceClient({
   // Build a map of attendance records keyed by member_id + session_id + week_id
   const attendanceMap = useMemo(() => {
     const map = new Map<string, Attendance>();
-    for (const record of attendanceRecords) {
+    for (const record of optimisticAttendance) {
       const key = `${record.member_id}_${record.session_id}_${record.week_id}`;
       map.set(key, record);
     }
     return map;
-  }, [attendanceRecords]);
+  }, [optimisticAttendance]);
 
   const getAttendance = useCallback(
     (memberId: string, sessionId: string, weekId: string): Attendance | undefined => {
@@ -218,26 +285,35 @@ export function AttendanceClient({
       setLoading(true);
       setMessage(null);
 
-      const result = await markAttendance({
-        memberId,
-        sessionId: selectedSessionId,
-        weekId: selectedWeekId,
-        status,
-        reason,
-      });
+      startAttendanceTransition(async () => {
+        applyOptimisticAttendance({
+          member_id: memberId,
+          session_id: selectedSessionId,
+          week_id: selectedWeekId,
+          status,
+          reason: reason ?? null,
+        });
 
-      if (result.error) {
-        setMessageType("error");
-        setMessage(result.error);
-      } else {
-        setMessageType("success");
-        setMessage(`Attendance marked as ${statusLabel(status)}.`);
-        // Auto-dismiss success message after 5 seconds
-        setTimeout(() => setMessage(null), 5000);
-      }
-      setLoading(false);
+        const result = await markAttendance({
+          memberId,
+          sessionId: selectedSessionId,
+          weekId: selectedWeekId,
+          status,
+          reason,
+        });
+
+        if (result.error) {
+          setMessageType("error");
+          setMessage(result.error);
+        } else {
+          setMessageType("success");
+          setMessage(`Attendance marked as ${statusLabel(status)}.`);
+          setTimeout(() => setMessage(null), 5000);
+        }
+        setLoading(false);
+      });
     },
-    [selectedSessionId, selectedWeekId]
+    [selectedSessionId, selectedWeekId, applyOptimisticAttendance]
   );
 
   const openVrDialog = useCallback((memberId: string) => {
@@ -266,11 +342,11 @@ export function AttendanceClient({
   const specialAttendanceSet = useMemo(
     () =>
       new Set(
-        specialEventAttendance.map(
+        optimisticEventAttendance.map(
           (sa) => `${sa.special_event_id}_${sa.member_id}`
         )
       ),
-    [specialEventAttendance]
+    [optimisticEventAttendance]
   );
 
   const hasMemberAttendedEvent = useCallback(
@@ -282,11 +358,11 @@ export function AttendanceClient({
 
   const getEventAttendedCount = useCallback(
     (specialEventId: string): number => {
-      return specialEventAttendance.filter(
+      return optimisticEventAttendance.filter(
         (sa) => sa.special_event_id === specialEventId
       ).length;
     },
-    [specialEventAttendance]
+    [optimisticEventAttendance]
   );
 
   const handleCreateEvent = useCallback(async () => {
@@ -339,18 +415,25 @@ export function AttendanceClient({
       setTogglingId(`${specialEventId}_${memberId}`);
       setMessage(null);
 
-      const result = await toggleSpecialEventAttendance({
-        specialEventId,
-        memberId,
-      });
+      startEventAttendanceTransition(async () => {
+        toggleOptimisticEventAttendance({
+          special_event_id: specialEventId,
+          member_id: memberId,
+        });
 
-      if (result.error) {
-        setMessageType("error");
-        setMessage(result.error);
-      }
-      setTogglingId(null);
+        const result = await toggleSpecialEventAttendance({
+          specialEventId,
+          memberId,
+        });
+
+        if (result.error) {
+          setMessageType("error");
+          setMessage(result.error);
+        }
+        setTogglingId(null);
+      });
     },
-    []
+    [toggleOptimisticEventAttendance]
   );
 
   const getEventMemberSearch = useCallback(

@@ -9,6 +9,11 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { TEAM_LABELS, WEIGHTS, ROLLING_WINDOW_WEEKS, DIVISION_MAP } from "@/lib/constants";
 import type { Allocation, Attendance, Week, TrainingRequirement } from "@/types/database";
 
@@ -47,23 +52,22 @@ export default async function ProfilePage() {
   const member = await getCurrentUser();
   const supabase = await createClient();
 
-  // ── Fetch latest open or drafted week for requirement check ──
-  const { data: latestWeek } = await supabase
-    .from("weeks")
-    .select("*")
-    .in("status", ["open", "closed", "drafted"])
-    .order("start_date", { ascending: false })
-    .limit(1)
-    .single();
+  // ── Fetch latest week and attendance records in parallel ──
+  const [{ data: latestWeek }, { data: attendanceRecords }] = await Promise.all([
+    supabase
+      .from("weeks")
+      .select("*")
+      .in("status", ["open", "closed", "drafted"])
+      .order("start_date", { ascending: false })
+      .limit(1)
+      .single(),
+    supabase
+      .from("attendance")
+      .select("status")
+      .eq("member_id", member.id),
+  ]);
 
   const typedLatestWeek = latestWeek as Week | null;
-
-  // ── Attendance percentage ──
-  // Count total attendance records and "present" ones for this member
-  const { data: attendanceRecords } = await supabase
-    .from("attendance")
-    .select("status")
-    .eq("member_id", member.id);
 
   const typedAttendance = (attendanceRecords as Pick<Attendance, "status">[]) || [];
   const totalAttendanceRecords = typedAttendance.length;
@@ -76,17 +80,28 @@ export default async function ProfilePage() {
       : 100; // Default to 100% if no records
 
   // ── Past live fires in rolling window ──
-  // Get weeks within the rolling window (last N weeks before the latest week)
+  // Get weeks within the rolling window and training requirements in parallel
   let pastLiveFires = 0;
+  let requirementGap = 0;
+  let requiredSessions = 0;
+  let attendedSessions = 0;
 
   if (typedLatestWeek) {
-    const { data: recentWeeks } = await supabase
-      .from("weeks")
-      .select("id")
-      .lt("start_date", typedLatestWeek.start_date)
-      .order("start_date", { ascending: false })
-      .limit(ROLLING_WINDOW_WEEKS);
+    // These two queries are independent — run in parallel
+    const [{ data: recentWeeks }, { data: requirementsRaw }] = await Promise.all([
+      supabase
+        .from("weeks")
+        .select("id")
+        .lt("start_date", typedLatestWeek.start_date)
+        .order("start_date", { ascending: false })
+        .limit(ROLLING_WINDOW_WEEKS),
+      supabase
+        .from("training_requirements")
+        .select("*")
+        .eq("week_id", typedLatestWeek.id),
+    ]);
 
+    // ── Past live fires in rolling window ──
     const rollingWindowWeekIds = ((recentWeeks as { id: string }[]) || []).map(
       (w) => w.id
     );
@@ -102,19 +117,8 @@ export default async function ProfilePage() {
 
       pastLiveFires = ((pastAllocations as Pick<Allocation, "id">[]) || []).length;
     }
-  }
 
-  // ── Training requirement gap ──
-  let requirementGap = 0;
-  let requiredSessions = 0;
-  let attendedSessions = 0;
-
-  if (typedLatestWeek) {
-    // Fetch training requirements for this week
-    const { data: requirementsRaw } = await supabase
-      .from("training_requirements")
-      .select("*")
-      .eq("week_id", typedLatestWeek.id);
+    // ── Training requirement gap ──
 
     const requirements = (requirementsRaw as TrainingRequirement[]) ?? [];
     const division = DIVISION_MAP[member.level as keyof typeof DIVISION_MAP];
@@ -165,21 +169,22 @@ export default async function ProfilePage() {
     }
 
     if (requiredSessions > 0) {
-      // Count this week's attended sessions
-      const { data: weekAttendance } = await supabase
-        .from("attendance")
-        .select("status")
-        .eq("member_id", member.id)
-        .eq("week_id", typedLatestWeek.id);
+      // Count this week's attended sessions + special events in parallel
+      const [{ data: weekAttendance }, { data: specialEventsRaw }] =
+        await Promise.all([
+          supabase
+            .from("attendance")
+            .select("status")
+            .eq("member_id", member.id)
+            .eq("week_id", typedLatestWeek.id),
+          supabase
+            .from("special_events")
+            .select("id")
+            .eq("week_id", typedLatestWeek.id),
+        ]);
 
       const regularAttended = ((weekAttendance as Pick<Attendance, "status">[]) ?? [])
         .filter((a) => a.status === "present" || a.status === "vr").length;
-
-      // Count special event attendance
-      const { data: specialEventsRaw } = await supabase
-        .from("special_events")
-        .select("id")
-        .eq("week_id", typedLatestWeek.id);
 
       const seIds = ((specialEventsRaw as { id: string }[]) ?? []).map((e) => e.id);
       let specialAttended = 0;
@@ -261,31 +266,73 @@ export default async function ProfilePage() {
           {/* ── Factor values ── */}
           <div className="space-y-3">
             <div className="flex justify-between">
-              <span className="text-sm text-gray-500">
-                Attendance % (A)
-              </span>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="text-sm text-gray-500 underline decoration-dotted decoration-gray-300 underline-offset-2 cursor-help">
+                      Attendance % (A)
+                    </span>
+                  }
+                />
+                <TooltipContent>
+                  Percent of sessions you attended (status = Present) out of all
+                  marked sessions. Higher = better score.
+                </TooltipContent>
+              </Tooltip>
               <span className="text-sm font-medium">
                 {attendancePct.toFixed(1)}%
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-sm text-gray-500">
-                Past Live Fires in {ROLLING_WINDOW_WEEKS}-week window (L_past)
-              </span>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="text-sm text-gray-500 underline decoration-dotted decoration-gray-300 underline-offset-2 cursor-help">
+                      Past Live Fires in {ROLLING_WINDOW_WEEKS}-week window (L_past)
+                    </span>
+                  }
+                />
+                <TooltipContent>
+                  Live-fire slots you received in the last {ROLLING_WINDOW_WEEKS}{" "}
+                  weeks. More past live fires reduces your score so others get a
+                  fair turn.
+                </TooltipContent>
+              </Tooltip>
               <span className="text-sm font-medium">{pastLiveFires}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-sm text-gray-500">
-                No-Show Count (N)
-              </span>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="text-sm text-gray-500 underline decoration-dotted decoration-gray-300 underline-offset-2 cursor-help">
+                      No-Show Count (N)
+                    </span>
+                  }
+                />
+                <TooltipContent>
+                  Number of times you were marked absent without valid reason
+                  this semester. Each no-show penalises your score.
+                </TooltipContent>
+              </Tooltip>
               <span className="text-sm font-medium">
                 {member.no_show_count}
               </span>
             </div>
             <div className="flex justify-between">
-              <span className="text-sm text-gray-500">
-                Requirement Gap (P)
-              </span>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="text-sm text-gray-500 underline decoration-dotted decoration-gray-300 underline-offset-2 cursor-help">
+                      Requirement Gap (P)
+                    </span>
+                  }
+                />
+                <TooltipContent>
+                  Sessions still needed this week to meet your training
+                  requirement. A larger gap boosts your score so the algorithm
+                  helps you catch up.
+                </TooltipContent>
+              </Tooltip>
               <span className="text-sm font-medium">
                 {requiredSessions > 0
                   ? `${effectiveGap} (${attendedSessions}/${requiredSessions} attended)`

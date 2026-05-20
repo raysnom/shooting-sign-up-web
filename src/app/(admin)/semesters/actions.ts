@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 import { logAudit } from "@/lib/utils/audit";
 
@@ -57,6 +57,7 @@ export async function createSemester(input: CreateSemesterInput) {
   await logAudit("semester.create", userId, undefined, { name: input.name });
 
   revalidatePath("/semesters");
+  updateTag("semesters");
   return { success: true };
 }
 
@@ -82,6 +83,8 @@ export async function deleteSemester(id: string) {
   await logAudit("semester.delete", userId, id);
 
   revalidatePath("/semesters");
+  updateTag("semesters");
+  updateTag("weeks");
   return { success: true };
 }
 
@@ -105,5 +108,6 @@ export async function resetNoShowCounts() {
   await logAudit("no_show.reset", userId);
 
   revalidatePath("/semesters");
+  updateTag("members");
   return { success: true };
 }
