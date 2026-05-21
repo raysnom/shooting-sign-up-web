@@ -6,7 +6,12 @@ import type { AllocationWithSession, AllocationWithSessionAndMember } from "./pa
 import { DAY_LABELS, TEAM_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { formatDate, formatTime } from "@/lib/utils/datetime";
-import { cancelAllocation, submitAbsenceReason, setRunningLate } from "./actions";
+import {
+  cancelAllocation,
+  submitAbsenceReason,
+  setRunningLate,
+  claimLeftoverSlot,
+} from "./actions";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -157,6 +162,7 @@ interface ScheduleClientProps {
   sessions: Session[];
   excoDuties: ExcoDuty[];
   currentMemberId: string;
+  submittedPrefs: boolean;
 }
 
 export function ScheduleClient({
@@ -166,6 +172,7 @@ export function ScheduleClient({
   sessions,
   excoDuties,
   currentMemberId,
+  submittedPrefs,
 }: ScheduleClientProps) {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -198,6 +205,9 @@ export function ScheduleClient({
 
   // Cancel confirmation dialog state
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
+
+  // Leftover-claim state — id of the session currently being claimed (for the spinner)
+  const [claimingSessionId, setClaimingSessionId] = useState<string | null>(null);
 
   // Provide Reason dialog state
   const [reasonDialogOpen, setReasonDialogOpen] = useState(false);
@@ -337,6 +347,60 @@ export function ScheduleClient({
 
     return slots;
   }, [sessions, allocationsBySession, sessionsWithDuty]);
+
+  // Sessions where the current user already has an active allocation —
+  // used to disable the "Claim" button for those sessions.
+  const myAllocatedSessionIds = useMemo(
+    () => new Set(optimisticAllocations.map((a) => a.session_id)),
+    [optimisticAllocations]
+  );
+
+  // Leftover capacity per session (only meaningful when the member is eligible
+  // to claim, i.e. didn't submit prefs and the week is published).
+  const leftoverSessions = useMemo(() => {
+    if (submittedPrefs || week.status !== "published") return [];
+
+    return sessions
+      .map((session) => {
+        const allocs = allocationsBySession.get(session.id) || [];
+        const liveUsed = allocs.filter((a) => a.type === "live").length;
+        const dryUsed = allocs.filter((a) => a.type === "dry").length;
+        const liveLeft = Math.max(0, session.live_lanes - liveUsed);
+        const dryLeft = Math.max(0, session.dry_lanes - dryUsed);
+        return { session, liveLeft, dryLeft };
+      })
+      .filter((s) => s.liveLeft > 0 || s.dryLeft > 0)
+      .sort((a, b) => {
+        const dayOrderA = DAY_ORDER.indexOf(a.session.day as DayType);
+        const dayOrderB = DAY_ORDER.indexOf(b.session.day as DayType);
+        if (dayOrderA !== dayOrderB) return dayOrderA - dayOrderB;
+        return a.session.time_start.localeCompare(b.session.time_start);
+      });
+  }, [submittedPrefs, week.status, sessions, allocationsBySession]);
+
+  const handleClaim = useCallback(
+    (sessionId: string) => {
+      setMessage(null);
+      setClaimingSessionId(sessionId);
+      startTransition(async () => {
+        const result = await claimLeftoverSlot(sessionId);
+        if (result.error) {
+          setMessageType("error");
+          setMessage(result.error);
+        } else {
+          setMessageType("success");
+          setMessage(
+            `Slot claimed. You have been allocated to ${
+              result.type === "live" ? "live fire" : "dry fire"
+            }.`
+          );
+          setTimeout(() => setMessage(null), 5000);
+        }
+        setClaimingSessionId(null);
+      });
+    },
+    [startTransition]
+  );
 
   const handleCancel = useCallback(
     (allocationId: string) => {
@@ -556,6 +620,76 @@ export function ScheduleClient({
                 </p>
               </div>
             )}
+
+            {/* ── Leftover slots (only for non-submitters in a published week) ── */}
+            {!submittedPrefs &&
+              week.status === "published" &&
+              leftoverSessions.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Available Leftover Slots</CardTitle>
+                    <CardDescription>
+                      You didn&rsquo;t submit preferences for this week, but you
+                      can still claim any leftover slots below. The system gives
+                      you live fire if available, dry fire otherwise.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {leftoverSessions.map(({ session, liveLeft, dryLeft }) => {
+                        const alreadyAllocated = myAllocatedSessionIds.has(
+                          session.id
+                        );
+                        const isClaiming =
+                          claimingSessionId === session.id && isPending;
+                        return (
+                          <div
+                            key={session.id}
+                            className="rounded-md border bg-white p-3"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <div className="font-medium">{session.name}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {DAY_LABELS[session.day] ?? session.day}{" "}
+                                  &middot;{" "}
+                                  {formatTime(session.time_start)} &ndash;{" "}
+                                  {formatTime(session.time_end)}
+                                </div>
+                              </div>
+                              <div className="flex flex-col items-end gap-1">
+                                {liveLeft > 0 && (
+                                  <Badge className="bg-green-600 text-white">
+                                    {liveLeft} live left
+                                  </Badge>
+                                )}
+                                {dryLeft > 0 && (
+                                  <Badge className="bg-blue-100 text-blue-700">
+                                    {dryLeft} dry left
+                                  </Badge>
+                                )}
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <Button
+                                size="sm"
+                                disabled={alreadyAllocated || isClaiming}
+                                onClick={() => handleClaim(session.id)}
+                              >
+                                {alreadyAllocated
+                                  ? "Already allocated"
+                                  : isClaiming
+                                    ? "Claiming..."
+                                    : "Claim this slot"}
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
 
             {orderedDays.map((day) => (
               <div key={day} className="space-y-3">

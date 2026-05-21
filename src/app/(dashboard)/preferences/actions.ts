@@ -30,6 +30,7 @@ type RankingInput = {
 
 export async function submitPreferences(
   weekId: string,
+  maxLiveCount: number | null,
   rankings: RankingInput[]
 ) {
   const { error: authError, userId } = await verifyMember();
@@ -40,6 +41,13 @@ export async function submitPreferences(
   if (!allowed) return { error: "Too many submissions. Please wait a minute." };
 
   if (!isValidUUID(weekId)) return { error: "Invalid week ID." };
+
+  if (
+    maxLiveCount !== null &&
+    (!Number.isInteger(maxLiveCount) || maxLiveCount < 0 || maxLiveCount > 10)
+  ) {
+    return { error: "Invalid max live fire count." };
+  }
 
   // Validate rankings
   if (rankings.length > 10) return { error: "Too many preferences." };
@@ -88,6 +96,7 @@ export async function submitPreferences(
       session_id: r.session_id,
       rank: r.rank,
       running_late: r.running_late === true,
+      max_live_count: maxLiveCount,
     }));
 
     const { error: insertError } = await supabase

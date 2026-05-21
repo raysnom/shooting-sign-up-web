@@ -73,10 +73,10 @@ The President creates this template once. Each week, sessions are auto-generated
 
 ### Weekly Flow
 
-1. **Preference Submission** — Members log in and **rank the sessions they want live fire for**, in order of preference (e.g. #1 Tue Afternoon, #2 Thu Afternoon, #3 Sat Morning). If they don't win live fire for a session, they are auto-assigned dry fire for that session instead. Members who do not submit preferences are **excluded entirely** from that week's draft.
+1. **Preference Submission** — Members log in and **rank the sessions they want live fire for**, in order of preference (e.g. #1 Tue Afternoon, #2 Thu Afternoon, #3 Sat Morning). If they don't win live fire for a session, they are auto-assigned dry fire for that session instead. Members can optionally set a **Maximum live fire sessions** cap (e.g. rank 6 sessions but only want live fire 4 times) — the draft will give them live fire on their top N by score and fall back to dry for the rest. Members who do not submit preferences are excluded from the priority-score draft but can claim leftover slots after publication — see [Post-Draft Leftover Claiming](#post-draft-leftover-claiming).
 2. **Deadline** — Submission window closes at **5:00 PM on Saturday**.
 3. **Draft Execution** — The algorithm calculates a priority score for every member who requested each slot and assigns lanes from highest score to lowest.
-4. **Automatic Dry Fire Fallback** — If a member's score is not high enough for a live fire lane, they are automatically assigned a dry fire lane for that session.
+4. **Automatic Dry Fire Fallback** — If a member's score is not high enough for a live fire lane (or they've hit their personal/admin live fire cap), they are automatically assigned a dry fire lane for that session.
 5. **Schedule Publication** — Results are published by **8:00 PM on Saturday**. The system sends every member a single, clean schedule with their confirmed slots for the week.
 
 ### Priority Score Formula
@@ -120,6 +120,31 @@ The algorithm limits how far it will drop a member down their preference list to
 4. **Spare Gun Protocol** — The member keeps their original top-choice session. Both affected members receive a warning in their schedule:
 
    > ⚠️ **Shared Gun Clash:** You are sharing Gun_Club4 with [Other Member] during this session. Please coordinate.
+
+---
+
+## Live Fire Caps
+
+Two independent caps limit how many live fire slots a single member can win in a week. The draft uses the **lower** of the two for each member:
+
+- **Admin-set cap (`weeks.max_live_per_member`)** — Optional, global for the week, set by the President from the Sessions admin page. Useful when the club wants to enforce rotation uniformly (e.g. "no one gets more than 3 live fire slots this week").
+- **Member-set cap (`preferences.max_live_count`)** — Optional, per-member, set by each member at preference-submission time. Lets a member rank a flexible spread of sessions but limit how many live fire allocations they actually want (e.g. rank 6 sessions, cap live fire at 4). Setting it to `0` means "I only want dry fire this week — skip me for all live fire even on my ranked sessions."
+
+When a member hits their effective cap during the draft, they don't disappear from their other ranked sessions — they simply fall through to the dry fire allocation pass for those sessions (subject to dry fire capacity).
+
+---
+
+## Post-Draft Leftover Claiming
+
+After the draft is published, sessions sometimes have unfilled lanes — either because not enough members ranked them, or because no-pref-submitters and late joiners haven't been accounted for. **Members who did not submit any preferences for the week** can claim these leftover slots from their Schedule page:
+
+- A new **Available Leftover Slots** section appears on the schedule for eligible members during a `published` week (not visible during `drafted` admin-review).
+- Each session with leftover capacity shows its remaining live/dry counts and a **Claim this slot** button.
+- The system **auto-prefers live fire** — if there's a live fire lane open, that's what the claimer gets; otherwise they get dry fire.
+- Live fire claims still respect `weeks.max_live_per_member` (admin-set cap); dry fire is uncapped for leftover-claimers since they didn't engage with the priority-score system.
+- Claimed slots are normal allocations — the 24-hour cancellation flow and the cancel→dry-promote auto-upgrade work the same way.
+
+Members who **did** submit preferences (even if they only got 0 allocations) are **not eligible** to claim leftovers — they've already been considered by the priority-score draft. This keeps the system fair: people who engaged with the draft are committed to it, and people who skipped the draft entirely take whatever's still going.
 
 ---
 
@@ -205,21 +230,32 @@ EXCO members see a "~30 min late" badge next to a late member's name on the atte
 ## Authentication & Member Onboarding
 
 - Each member has a unique **loginID** (e.g. school student ID) that links their account to their profile.
-- **President bulk-uploads** the member list (name, loginID, email, class, team) via CSV — the system creates accounts in Supabase Auth using `inviteUserByEmail()`.
-- **The President never handles passwords.** Supabase sends each member an invite email automatically.
+- **President bulk-uploads** the member list (name, loginID, email, class, team) via CSV — the system creates Supabase Auth accounts via `supabase.auth.admin.createUser({ email_confirm: true })` with a shared **default temp password** (currently `njcsc26!`). **No invite email is sent** — accounts are auto-confirmed and ready to use immediately.
 - Login is via **email + password**. Each session is authenticated through Supabase.
+- Members CAN change their password by visiting `/set-password` directly, but there is no link to this route from the dashboard sidebar, so in practice all members share the same default password. Acceptable for this club's threat model; revisit if multi-tenant or external use is ever needed.
 
 ### Member Onboarding Flow
 
-1. **President uploads CSV** — system creates accounts and triggers invite emails.
-2. **Member receives invite email** — clicks the link in the email.
-3. **Member sets their own password** — redirected to a `/set-password` page.
-4. **Account is ready** — member can log in and their profile (loginID, team, level, class) is already linked.
+1. **President uploads CSV** — system creates auto-confirmed accounts with the default temp password.
+2. **President broadcasts credentials** in a single WhatsApp message to the club group (email = each member's address, password = the shared default — same for everyone).
+3. **Member logs in** with their email + default password — works immediately, no email confirmation step.
+4. **(Optional)** Member visits `/set-password` directly to change their password — not advertised in-app, so this rarely happens in practice.
 
 ### Adding Members After Initial Upload
 
-- President can also **create individual member profiles** from the admin dashboard.
-- New members go through the same invite flow — they receive an email and set their own password.
+- President can also **create individual member profiles** from the admin Members page.
+- New accounts also get the default temp password.
+
+### Recovering a Lost Password
+
+- President clicks **Reset Password** on any member's row in the admin Members page.
+- The member's password is reset to the current default temp password.
+- President shares that password with the member, who can then change it.
+
+### Teacher / Oversight Accounts
+
+- A shared **TIC (Teacher In Charge)** account exists with role `exco`.
+- TIC can view schedules, view attendance, and mark attendance — but cannot run drafts, manage members, or modify configuration.
 
 ---
 

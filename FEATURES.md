@@ -17,6 +17,7 @@ Two tabs:
 - **Gun clash warnings** appear as yellow banners if you share a gun with another member
 - Shows EXCO duty assignments (if you're selected to open/close the range)
 - **"I'll be ~30 min late" toggle** on each session card — tap when a lesson runs late so EXCO sees the heads-up at attendance time. If you toggle late on the day's first session and you were the EXCO opener, duty is reassigned to another EXCO automatically.
+- **Available Leftover Slots** — if you did NOT submit preferences for the current week (and the week is `published`), a new section appears listing every session that still has empty lanes. Tap **Claim this slot** on any session to claim it — the system gives you a live fire lane if one's available, otherwise a dry fire spot. First come, first served. (Members who submitted preferences don't see this — they're already in the draft allocation.)
 - **Empty state:** If no schedule is published yet, shows "Schedule not yet available" message
 
 **Full Schedule** — the whole-club weekly grid
@@ -37,19 +38,21 @@ Two tabs:
 
 - **Preference picker:** Click sessions to rank them in order (1 = top choice, 2 = second choice, etc.)
 - **Arrow buttons:** Reorder your preferences by moving them up/down
+- **Maximum live fire sessions (optional cap):** Number input — set how many of your ranked sessions you're willing to get live fire for. Leave blank for no cap (default behaviour — could win live fire on every ranked session). Set to e.g. `4` if you rank 6 but only want live fire 4 times. Set to `0` to opt out of live fire entirely (you'll only ever get dry fire from the draft). Distinct from the admin-set per-week cap; the draft uses whichever is stricter.
 - **"I'll be ~30 min late" checkbox** under each ranked session — tick when a lesson runs over the session start. The flag is carried onto your allocation so EXCO sees it on the attendance page. If you're EXCO and the session is the **first of the day** (range opener), the draft will not assign you opening duty for that session.
 - **Deadline countdown:** Shows time remaining until Saturday 5:00 PM cutoff
 - **Read-only after deadline:** Once the deadline passes, you can view but not edit your preferences
-- **Important:** If you don't submit preferences, you are **excluded entirely** from that week's draft
+- **Important:** If you don't submit preferences, you're excluded from the priority-score draft — but once the schedule is published you can still claim any leftover slot from the **Schedule** page (first come, first served, live preferred).
 
 **When to use:** Every week before Saturday 5pm. Rank the sessions you want live fire for. If you don't win live fire for a session you ranked, you'll automatically get dry fire instead.
 
 **How it works:**
 1. Click on sessions you want to train in (for live fire)
 2. Drag to reorder by priority (#1 = most wanted)
-3. Tick "I'll be ~30 min late" for any session where you know a lesson runs late
-4. Submit before Saturday 5pm
-5. Wait for schedule publication (Saturday 8pm)
+3. (Optional) Set the *Maximum live fire sessions* cap if you don't want live fire on every ranked session
+4. Tick "I'll be ~30 min late" for any session where you know a lesson runs late
+5. Submit before Saturday 5pm
+6. Wait for schedule publication (Saturday 8pm)
 
 ---
 
@@ -198,7 +201,8 @@ This page has **two tabs:**
 - **Archive members:** Mark graduated seniors as archived (hides them from active lists)
 - **Delete members:** Permanently remove member records (use with caution!)
 - **Create individual member:** Add one new member at a time
-  - Triggers invite email — they set their own password
+  - Account is created with the default temp password (`njcsc26!`)
+- **Reset Password:** Per-row button to reset any member back to the default temp password. Shows the password in a dialog with a Copy button.
 
 #### **Tab 2: Bulk Upload**
 - **Upload CSV:** Import multiple members at once
@@ -208,8 +212,7 @@ This page has **two tabs:**
   JOHNAPW4,John Tan,john_tan@students.edu.sg,APW,JH4,member
   MARIAPM2,Maria Lim,maria_lim@students.edu.sg,APM,SH2,exco
   ```
-- **Automatic invite emails:** System sends each member an invite link
-- **Password security:** President never handles passwords — members set their own
+- **Default temp password:** Every new account is created with the same default temp password (`njcsc26!`) and is auto-confirmed (no invite email). Share it with members in a single broadcast message (e.g. WhatsApp). Members can technically change it by navigating to `/set-password` directly, but there is no sidebar link to that page, so most members will keep the shared default.
 
 **When to use:**
 - **Start of semester:** Bulk upload all new members

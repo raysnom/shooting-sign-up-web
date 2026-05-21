@@ -222,10 +222,12 @@ Members who don't submit preferences are excluded from the draft entirely.
 
 **Rationale**: Encourages engagement.
 
-### 6. President Never Handles Passwords
-Bulk upload triggers `supabase.auth.admin.inviteUserByEmail()`. Members set their own password.
+### 6. Shared Default Temp Password
+New accounts (individual create + bulk upload) are created via `supabase.auth.admin.createUser({ email_confirm: true })` with a shared default temp password defined as `DEFAULT_TEMP_PASSWORD` in `src/app/(admin)/members/actions.ts`. No invite email is sent — accounts are auto-confirmed and ready to use immediately. Credentials are broadcast separately (currently via a WhatsApp message to the club group). The admin Members page has a per-row **Reset Password** button (`resetMemberPassword` server action) that resets a member back to this default.
 
-**Rationale**: Security and privacy.
+`/set-password` exists and works for any logged-in user, but there is no sidebar link to it, so in practice members keep the shared default. If self-service password changes become a requirement later, add a "Change Password" entry to the sidebar that points to `/set-password`.
+
+**Rationale**: This is a low-stakes school project — a single password lets the President broadcast credentials in one message instead of sending 99 individual ones. Trades security for onboarding ergonomics.
 
 ### 7. Preferences Are for Live Fire Only
 Members rank sessions for live fire. If they don't win, they auto-get dry fire.
@@ -310,3 +312,5 @@ President defines session templates once. Each week auto-generates sessions from
 | **DATABASE.md** | Database schema & RLS policies |
 | **ROADMAP.md** | Phased execution plan & project status |
 | **FEATURES.md** | User guide (what each page does) |
+| **INSTRUCTIONS.md** | WhatsApp broadcast message + FAQ used to onboard new members |
+| **INSTRUCTIONS_EXCO.md** | WhatsApp broadcast message + FAQ for EXCO members and the TIC (president) |

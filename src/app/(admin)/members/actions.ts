@@ -44,10 +44,11 @@ async function verifyPresidentRole() {
   return { user };
 }
 
-const DEFAULT_TEMP_PASSWORD = "njcsc26!";
+const MEMBER_TEMP_PASSWORD = "njcscmember2026!";
+const STAFF_TEMP_PASSWORD = "njcsc26!";
 
-function generateTempPassword(): string {
-  return DEFAULT_TEMP_PASSWORD;
+function generateTempPassword(role: RoleType = "member"): string {
+  return role === "member" ? MEMBER_TEMP_PASSWORD : STAFF_TEMP_PASSWORD;
 }
 
 type CreateMemberInput = {
@@ -75,7 +76,7 @@ export async function createMember(input: CreateMemberInput) {
     return { error: `Invalid level. Must be one of: ${VALID_LEVELS.join(", ")}` };
 
   const admin = createAdminClient();
-  const tempPassword = generateTempPassword();
+  const tempPassword = generateTempPassword(input.role);
 
   const { data: authUser, error: authError } =
     await admin.auth.admin.createUser({
@@ -175,7 +176,7 @@ export async function bulkUploadMembers(csvData: string) {
     }
     row.role = row.role ? row.role.toLowerCase() : "member";
 
-    const tempPassword = generateTempPassword();
+    const tempPassword = generateTempPassword(row.role as RoleType);
 
     const { data: authUser, error: authError } =
       await admin.auth.admin.createUser({
@@ -256,13 +257,13 @@ export async function resetMemberPassword(memberId: string) {
 
   const { data: member, error: lookupError } = await admin
     .from("members")
-    .select("id, name, email")
+    .select("id, name, email, role")
     .eq("id", memberId)
     .single();
 
   if (lookupError || !member) return { error: "Member not found." };
 
-  const tempPassword = generateTempPassword();
+  const tempPassword = generateTempPassword(member.role as RoleType);
 
   const { error: updateError } = await admin.auth.admin.updateUserById(
     member.id,

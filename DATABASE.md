@@ -106,16 +106,17 @@
 ---
 
 ### `preferences`
-| Column        | Type      | Notes |
-|---------------|-----------|-------|
-| id            | uuid (PK) | |
-| member_id     | uuid (FK) | |
-| week_id       | uuid (FK) | |
-| session_id    | uuid (FK) | |
-| rank          | int       | 1 = top choice |
-| running_late  | boolean   | Default false. Member declares they will arrive ~30 min late (typically a lesson running over). Carried onto the resulting `allocations.running_late`. Used by the draft to skip late EXCOs when picking the day's first-session duty. |
-| created_at    | timestamp | |
-| **Unique**    | | (member_id, week_id, session_id) |
+| Column         | Type      | Notes |
+|----------------|-----------|-------|
+| id             | uuid (PK) | |
+| member_id      | uuid (FK) | |
+| week_id        | uuid (FK) | |
+| session_id     | uuid (FK) | |
+| rank           | int       | 1 = top choice |
+| running_late   | boolean   | Default false. Member declares they will arrive ~30 min late (typically a lesson running over). Carried onto the resulting `allocations.running_late`. Used by the draft to skip late EXCOs when picking the day's first-session duty. |
+| max_live_count | int       | Nullable. Member-set cap on live fire slots for the week (e.g. rank 6 sessions but only want live fire 4 times → set to 4). NULL = no member cap (effectively the number of ranked sessions). Stored redundantly on every row of a (member, week) batch since prefs are deleted+inserted as a batch and all rows share the same value. Distinct from `weeks.max_live_per_member` (admin-set, global). Draft engine uses MIN of both. Migration `014`. |
+| created_at     | timestamp | |
+| **Unique**     | | (member_id, week_id, session_id) |
 
 ---
 
@@ -219,7 +220,18 @@ Database migrations are located in `supabase/migrations/`:
 
 1. **001_initial_schema.sql** — Creates all tables, enums, and relationships
 2. **002_rls_policies.sql** — Enables RLS and defines all security policies
-3. **003_add_max_live_per_member.sql** — Adds optional per-week live fire cap
+3. **003_add_max_live_per_member.sql** — Adds optional per-week (admin-set) live fire cap
+4. **004_divisions_groups_special_events.sql** — Adds division enum, competition groups, and special events tables
+5. **005_drop_competition_flags.sql** — Removes the unused `competition_flags` table (replaced by competition groups)
+6. **006_gun_data.sql** — Seeds the initial gun inventory
+7. **007_add_individual_gun_type.sql** — Adds `individual` to the `gun_type` enum
+8. **008_atomic_no_show_count.sql** — Replaces ad-hoc no-show increments with an atomic SQL function
+9. **009_audit_log.sql** — Adds the `audit_log` table for tracking admin actions
+10. **010_add_drafting_week_status.sql** — Adds `drafting` to the `week_status` enum (atomic draft lock)
+11. **011_add_running_late_to_allocations.sql** — Adds `running_late`/`running_late_at` columns to `allocations`
+12. **012_add_running_late_to_preferences.sql** — Adds `running_late` column to `preferences`
+13. **013_reenable_rls_members.sql** — Re-enables RLS on the `members` table with documented policies
+14. **014_add_max_live_count_to_preferences.sql** — Adds member-set live fire cap (`max_live_count`) to `preferences`
 
 Run migrations in order using the Supabase SQL Editor or CLI.
 

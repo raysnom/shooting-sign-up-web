@@ -17,7 +17,7 @@
 - [x] Implement auth middleware — redirect unauthenticated users
 - [x] Build role-based layout — Member vs EXCO vs President nav
 - [x] Build member management page — create individual profiles, bulk-upload CSV, edit, archive
-- [x] Implement bulk-upload flow — parse CSV, call `supabase.auth.admin.inviteUserByEmail()` per member, link auth UID to member profile
+- [x] Implement bulk-upload flow — parse CSV, call `supabase.auth.admin.createUser({ email_confirm: true })` per member with a shared default temp password, link auth UID to member profile (no invite email sent — credentials broadcast separately by the president)
 - [x] Build handover page — promote to EXCO, transfer presidency
 
 ---
@@ -126,10 +126,14 @@
 - [x] Preferences page: rewrote wall-of-text card description into a 2-step numbered list with EXCO-only running-late callout (role-gated)
 - [x] Page-specific loading skeletons added for `/preferences` and `/profile`
 
+### Member-controlled allocation & leftover claiming (May 2026)
+- [x] **Member-set live fire cap** — new optional `max_live_count` field on the preferences page. Members can rank 6+ sessions but cap live fire allocations at N (or set to 0 for dry-fire-only). Migration `014_add_max_live_count_to_preferences.sql`. Draft engine takes `MIN(weeks.max_live_per_member, preferences.max_live_count)` per member.
+- [x] **Post-draft leftover claiming** — members who didn't submit preferences can claim unfilled slots on their Schedule page once the week is `published`. Auto-prefers live fire, falls back to dry. New `claimLeftoverSlot()` server action in `src/app/(dashboard)/schedule/actions.ts`. Member-side eligibility is "zero preferences for the week" (members who submitted but got 0 allocations are NOT eligible — they were already considered by the draft).
+
 ### Member Onboarding & Instructions
-- [~] Write member-facing usage instructions — in progress as an external Notion doc, shared with the club directly via existing channels (Slack/WhatsApp/etc.) rather than linked from the sidebar
-- [~] First-login "verify your email address is correct" banner — **deferred** for now
-- [x] Decided format: external Notion doc (not linked in-app; distributed by the club president directly)
+- [x] Member-facing usage instructions — drafted as a single WhatsApp broadcast message (with FAQ section) covering login credentials, weekly preference deadline, schedule check, cancellation, and VR submission. Distributed by the president directly to the club WhatsApp group; not linked from the sidebar.
+- [~] First-login "verify your email address is correct" banner — **deferred** for now (members can flag wrong emails via the WhatsApp group, and the president edits via the admin Members page)
+- [x] Decided format: WhatsApp broadcast message (not Notion, not in-app `/help` page)
 
 ### Deployment Tasks
 - [ ] Set up Vercel project
@@ -200,7 +204,7 @@ Ideas for future iterations:
 ## Next Steps
 
 1. **Hands-on mobile testing** — Verify the new off-canvas sidebar drawer + key member flows on an actual phone
-2. **Finalize Notion member guide** — Cover login, set-password, preferences, schedule, cancellation, VR; share with the club via existing channels
+2. **Broadcast WhatsApp onboarding message** — Includes login credentials (email + shared default temp password), weekly deadline, and a short FAQ; sent to the club WhatsApp group
 3. **Set up Vercel deployment** — Project creation, GitHub connection, env vars (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`)
 4. **End-to-end testing on the deployed URL** — Full user flow from preference submission through draft to schedule publication
 5. **Production launch** — Monitor the first live draft cycle and gather member feedback

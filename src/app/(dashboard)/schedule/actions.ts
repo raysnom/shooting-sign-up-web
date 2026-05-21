@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
+import { rateLimit } from "@/lib/utils/rate-limit";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -143,6 +144,175 @@ export async function cancelAllocation(allocationId: string) {
 
   revalidatePath("/schedule");
   return { success: true };
+}
+
+// ──────────────────────────────────────────────
+// Claim a leftover slot (for members who didn't submit preferences)
+// ──────────────────────────────────────────────
+// Members who did NOT submit any preferences for the week can claim leftover
+// capacity in published sessions. System auto-prefers live fire and falls back
+// to dry. The week cap (max_live_per_member) still applies to live claims.
+// Supabase has no full transactions; we accept that a race could cause a
+// 1-slot oversubscription. We mitigate by re-checking counts immediately
+// before insert.
+
+export async function claimLeftoverSlot(
+  sessionId: string
+): Promise<
+  | { error: string; success?: undefined; type?: undefined }
+  | { success: true; type: "live" | "dry"; error?: undefined }
+> {
+  const { error: authError, userId } = await verifyMember();
+  if (authError || !userId) return { error: authError ?? "Not authenticated" };
+
+  // Rate limit: 10 claims per minute per user
+  const { allowed } = rateLimit(`claim:${userId}`, 10, 60_000);
+  if (!allowed) return { error: "Too many requests. Please wait a minute." };
+
+  if (!isValidUUID(sessionId)) return { error: "Invalid session ID." };
+
+  const supabase = await createClient();
+
+  // Fetch the session + its week
+  const { data: session, error: sessionError } = await supabase
+    .from("sessions")
+    .select("*, weeks(*)")
+    .eq("id", sessionId)
+    .single<{
+      id: string;
+      week_id: string;
+      live_lanes: number;
+      dry_lanes: number;
+      is_cancelled: boolean;
+      weeks: { id: string; status: string; max_live_per_member: number | null } | null;
+    }>();
+
+  if (sessionError || !session) return { error: "Session not found." };
+  if (session.is_cancelled) return { error: "This session has been cancelled." };
+
+  const week = session.weeks;
+  if (!week) return { error: "Week not found for this session." };
+  if (week.status !== "published") {
+    return { error: "Leftover slots can only be claimed once the week is published." };
+  }
+
+  const weekId = week.id;
+
+  // Caller must have submitted no preferences for this week
+  const { data: existingPrefs } = await supabase
+    .from("preferences")
+    .select("id")
+    .eq("member_id", userId)
+    .eq("week_id", weekId)
+    .limit(1);
+  if (existingPrefs && existingPrefs.length > 0) {
+    return {
+      error:
+        "Only members who did not submit preferences can claim leftover slots.",
+    };
+  }
+
+  // Caller must not already hold an active allocation for this session
+  const { data: existingAlloc } = await supabase
+    .from("allocations")
+    .select("id")
+    .eq("member_id", userId)
+    .eq("session_id", sessionId)
+    .eq("cancelled", false)
+    .limit(1);
+  if (existingAlloc && existingAlloc.length > 0) {
+    return { error: "You already have an allocation for this session." };
+  }
+
+  // Decide type by counting current usage
+  const decideType = async (): Promise<"live" | "dry" | null> => {
+    const { count: liveUsed } = await supabase
+      .from("allocations")
+      .select("id", { count: "exact", head: true })
+      .eq("session_id", sessionId)
+      .eq("type", "live")
+      .eq("cancelled", false);
+    if ((liveUsed ?? 0) < session.live_lanes) return "live";
+
+    const { count: dryUsed } = await supabase
+      .from("allocations")
+      .select("id", { count: "exact", head: true })
+      .eq("session_id", sessionId)
+      .eq("type", "dry")
+      .eq("cancelled", false);
+    if ((dryUsed ?? 0) < session.dry_lanes) return "dry";
+
+    return null;
+  };
+
+  // First decision (used only to short-circuit before fetching gun_id).
+  const initialType = await decideType();
+  if (!initialType) return { error: "No leftover slots available for this session." };
+
+  // Fetch the member's gun_id up front so the live-cap check + insert can
+  // both rely on it without a second roundtrip.
+  let memberGunId: string | null = null;
+  if (initialType === "live") {
+    const { data: memberRow } = await supabase
+      .from("members")
+      .select("gun_id")
+      .eq("id", userId)
+      .single<{ gun_id: string | null }>();
+    memberGunId = memberRow?.gun_id ?? null;
+  }
+
+  const admin = createAdminClient();
+
+  // Re-check capacity right before insert to narrow the race window.
+  const recheckType = await decideType();
+  if (!recheckType) return { error: "No leftover slots available for this session." };
+
+  const finalType: "live" | "dry" = recheckType;
+
+  // Enforce the week-level live cap — checked against finalType so a recheck
+  // that flips dry -> live (e.g. someone cancelled live) still respects the cap.
+  if (finalType === "live" && week.max_live_per_member !== null) {
+    const { count: memberLiveCount } = await supabase
+      .from("allocations")
+      .select("id", { count: "exact", head: true })
+      .eq("member_id", userId)
+      .eq("week_id", weekId)
+      .eq("type", "live")
+      .eq("cancelled", false);
+    if ((memberLiveCount ?? 0) >= week.max_live_per_member) {
+      return {
+        error: `You have already reached this week's live fire cap (${week.max_live_per_member}).`,
+      };
+    }
+  }
+
+  // If finalType is "live" but we didn't fetch gun_id (initialType was "dry"),
+  // grab it now.
+  if (finalType === "live" && memberGunId === null && initialType !== "live") {
+    const { data: memberRow } = await supabase
+      .from("members")
+      .select("gun_id")
+      .eq("id", userId)
+      .single<{ gun_id: string | null }>();
+    memberGunId = memberRow?.gun_id ?? null;
+  }
+
+  const { error: insertError } = await admin.from("allocations").insert({
+    member_id: userId,
+    session_id: sessionId,
+    week_id: weekId,
+    type: finalType,
+    gun_id: finalType === "live" ? memberGunId : null,
+    gun_clash_warning: null,
+    priority_score: 0,
+    cancelled: false,
+    running_late: false,
+  });
+
+  if (insertError) return { error: sanitizeDbError(insertError) };
+
+  revalidatePath("/schedule");
+  return { success: true, type: finalType };
 }
 
 // ──────────────────────────────────────────────

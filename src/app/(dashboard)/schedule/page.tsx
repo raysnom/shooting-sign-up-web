@@ -76,12 +76,13 @@ export default async function SchedulePage() {
     );
   }
 
-  // ── 3-6. Fetch allocations, sessions, and EXCO duties in parallel ──
+  // ── 3-7. Fetch allocations, sessions, EXCO duties, and member's prefs in parallel ──
   const [
     { data: allocations },
     { data: allAllocations },
     { data: sessions },
     { data: excoDuties },
+    { data: memberPrefs },
   ] = await Promise.all([
     supabase
       .from("allocations")
@@ -104,7 +105,15 @@ export default async function SchedulePage() {
       .from("exco_duty")
       .select("*")
       .eq("week_id", activeWeek.id),
+    supabase
+      .from("preferences")
+      .select("id")
+      .eq("member_id", member.id)
+      .eq("week_id", activeWeek.id)
+      .limit(1),
   ]);
+
+  const submittedPrefs = (memberPrefs?.length ?? 0) > 0;
 
   return (
     <ScheduleClient
@@ -114,6 +123,7 @@ export default async function SchedulePage() {
       sessions={(sessions as Session[]) || []}
       excoDuties={(excoDuties as ExcoDuty[]) || []}
       currentMemberId={member.id}
+      submittedPrefs={submittedPrefs}
     />
   );
 }

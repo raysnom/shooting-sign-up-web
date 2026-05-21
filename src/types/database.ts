@@ -92,6 +92,7 @@ export type Preference = {
   session_id: string;
   rank: number;
   running_late: boolean;
+  max_live_count: number | null;
   created_at: string;
 };
 

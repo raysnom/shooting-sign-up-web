@@ -40,7 +40,7 @@ export type DraftInput = {
   memberGunMap: Map<string, string | null>;
   memberNames: Map<string, string>;
   excoMemberIds: Set<string>;
-  maxLivePerMember: number | null;
+  memberMaxLiveCounts: Map<string, number | null>;
 };
 
 // ──────────────────────────────────────────────
@@ -107,7 +107,7 @@ export function runDraftEngine(input: DraftInput): DraftResult {
     memberGunMap,
     memberNames,
     excoMemberIds,
-    maxLivePerMember,
+    memberMaxLiveCounts,
   } = input;
 
   // 1. Sort sessions by day order then time_start
@@ -209,10 +209,11 @@ export function runDraftEngine(input: DraftInput): DraftResult {
     const skippedMembers: ScoredMember[] = [];
 
     for (const member of scored) {
-      // Check if member has reached the max live fire limit for the week
-      if (maxLivePerMember !== null) {
+      // Check if member has reached their effective live fire cap for the week
+      const cap = memberMaxLiveCounts.get(member.member_id) ?? null;
+      if (cap !== null) {
         const currentCount = memberLiveCount.get(member.member_id) ?? 0;
-        if (currentCount >= maxLivePerMember) {
+        if (currentCount >= cap) {
           // Member has reached limit, skip them for live fire
           skippedMembers.push(member);
           continue;
@@ -384,10 +385,11 @@ export function runDraftEngine(input: DraftInput): DraftResult {
     for (const member of scored) {
       // Try to assign to live fire first
       if (liveRemaining > 0 && lateMembers.length < liveRemaining) {
-        // Check if member has reached the max live fire limit
-        if (maxLivePerMember !== null) {
+        // Check if member has reached their effective live fire cap
+        const cap = memberMaxLiveCounts.get(member.member_id) ?? null;
+        if (cap !== null) {
           const currentCount = memberLiveCount.get(member.member_id) ?? 0;
-          if (currentCount >= maxLivePerMember) {
+          if (currentCount >= cap) {
             // Member has reached limit, try dry fire
             if (dryRemaining > 0 && lateDryMembers.length < dryRemaining) {
               lateDryMembers.push(member);

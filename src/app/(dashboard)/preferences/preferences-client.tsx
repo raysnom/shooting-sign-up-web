@@ -59,8 +59,13 @@ export function PreferencesClient({
     existingPreferences.filter((p) => p.running_late).map((p) => p.session_id)
   );
 
+  const initialMaxLive = existingPreferences[0]?.max_live_count;
+
   const [rankedIds, setRankedIds] = useState<string[]>(initialRankedIds);
   const [lateIds, setLateIds] = useState<Set<string>>(initialLateIds);
+  const [maxLiveCount, setMaxLiveCount] = useState<number | "">(
+    initialMaxLive == null ? "" : initialMaxLive
+  );
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [, startSubmitTransition] = useTransition();
@@ -160,6 +165,22 @@ export function PreferencesClient({
     [rankedIds.length]
   );
 
+  const handleMaxLiveChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const raw = e.target.value;
+      if (raw === "") {
+        setMaxLiveCount("");
+      } else {
+        const parsed = parseInt(raw, 10);
+        if (!Number.isNaN(parsed)) {
+          setMaxLiveCount(Math.max(0, Math.min(10, parsed)));
+        }
+      }
+      setMessage(null);
+    },
+    []
+  );
+
   const handleSubmit = useCallback(async () => {
     setLoading(true);
     setMessage(null);
@@ -170,10 +191,12 @@ export function PreferencesClient({
       running_late: lateIds.has(session_id),
     }));
 
+    const maxLive = maxLiveCount === "" ? null : maxLiveCount;
+
     startSubmitTransition(async () => {
       setOptimisticSavedCount(rankings.length);
 
-      const result = await submitPreferences(week.id, rankings);
+      const result = await submitPreferences(week.id, maxLive, rankings);
 
       if (result.error) {
         setMessage(`Error: ${result.error}`);
@@ -182,7 +205,7 @@ export function PreferencesClient({
       }
       setLoading(false);
     });
-  }, [rankedIds, lateIds, week.id, setOptimisticSavedCount]);
+  }, [rankedIds, lateIds, maxLiveCount, week.id, setOptimisticSavedCount]);
 
   // ──────────────────────────────────────────────
   // Interactive view (with warning if deadline passed)
@@ -285,6 +308,39 @@ export function PreferencesClient({
               </p>
             </div>
           )}
+
+          <Separator />
+
+          <div className="space-y-2">
+            <label
+              htmlFor="max-live-count"
+              className="block text-sm font-medium"
+            >
+              Maximum live fire sessions (optional)
+            </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                id="max-live-count"
+                type="number"
+                min={0}
+                max={10}
+                step={1}
+                value={maxLiveCount}
+                onChange={handleMaxLiveChange}
+                placeholder="No cap"
+                className="w-24 rounded-md border bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+              <Badge variant="outline">
+                You ranked {rankedIds.length}{" "}
+                {rankedIds.length === 1 ? "session" : "sessions"}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Leave blank for no cap. Set to 4 if you rank 6 but only want
+              live fire for 4 of them. Set to 0 to skip live fire entirely
+              (dry fire only).
+            </p>
+          </div>
         </CardContent>
       </Card>
 

@@ -120,7 +120,7 @@ export async function runDraft(weekId: string) {
   // 4. Fetch all preferences for these sessions (split on-time vs late)
   const { data: prefsRaw, error: prefsError } = await admin
     .from("preferences")
-    .select("member_id, session_id, rank, created_at, running_late")
+    .select("member_id, session_id, rank, created_at, running_late, max_live_count")
     .eq("week_id", weekId)
     .in("session_id", sessionIds);
 
@@ -152,6 +152,29 @@ export async function runDraft(weekId: string) {
 
   // Collect unique member IDs who have preferences
   const memberIdsWithPrefs = [...new Set(preferences.map((p) => p.member_id))];
+
+  // Build effective per-member live fire cap = MIN(week cap, member's max_live_count).
+  // NULL on either side means that side has no cap; NULL on both = no cap.
+  const weekCap = week.max_live_per_member as number | null;
+  const memberMaxLiveCounts = new Map<string, number | null>();
+  const seenMembers = new Set<string>();
+  for (const p of prefsRaw) {
+    const mid = p.member_id as string;
+    if (seenMembers.has(mid)) continue;
+    seenMembers.add(mid);
+    const memberCap = (p.max_live_count as number | null) ?? null;
+    let effective: number | null;
+    if (weekCap === null && memberCap === null) {
+      effective = null;
+    } else if (weekCap === null) {
+      effective = memberCap;
+    } else if (memberCap === null) {
+      effective = weekCap;
+    } else {
+      effective = Math.min(weekCap, memberCap);
+    }
+    memberMaxLiveCounts.set(mid, effective);
+  }
 
   // 5. Fetch all active, non-archived members who have preferences
   const { data: membersRaw, error: membersError } = await admin
@@ -401,7 +424,7 @@ export async function runDraft(weekId: string) {
     memberGunMap,
     memberNames,
     excoMemberIds,
-    maxLivePerMember: week.max_live_per_member,
+    memberMaxLiveCounts,
   });
 
   // 10. Write allocations to the database (bulk insert)
