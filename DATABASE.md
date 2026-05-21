@@ -106,15 +106,16 @@
 ---
 
 ### `preferences`
-| Column     | Type      | Notes |
-|------------|-----------|-------|
-| id         | uuid (PK) | |
-| member_id  | uuid (FK) | |
-| week_id    | uuid (FK) | |
-| session_id | uuid (FK) | |
-| rank       | int       | 1 = top choice |
-| created_at | timestamp | |
-| **Unique** | | (member_id, week_id, session_id) |
+| Column        | Type      | Notes |
+|---------------|-----------|-------|
+| id            | uuid (PK) | |
+| member_id     | uuid (FK) | |
+| week_id       | uuid (FK) | |
+| session_id    | uuid (FK) | |
+| rank          | int       | 1 = top choice |
+| running_late  | boolean   | Default false. Member declares they will arrive ~30 min late (typically a lesson running over). Carried onto the resulting `allocations.running_late`. Used by the draft to skip late EXCOs when picking the day's first-session duty. |
+| created_at    | timestamp | |
+| **Unique**    | | (member_id, week_id, session_id) |
 
 ---
 
@@ -131,6 +132,8 @@
 | priority_score    | float     | Score at time of allocation |
 | cancelled         | boolean   | Default false |
 | cancelled_at      | timestamp | Nullable |
+| running_late      | boolean   | Default false. Set from `preferences.running_late` at draft time, and toggle-able by the member from `/schedule` after the draft. EXCO sees a "~30 min late" badge next to the member's name on the attendance page. When toggled post-draft for the day's first session, the schedule action reassigns EXCO duty to a non-late EXCO if the member was the opener. |
+| running_late_at   | timestamp | Nullable. Set when `running_late` flips to true, cleared otherwise. |
 
 ---
 
@@ -166,7 +169,7 @@
 | id         | uuid (PK) | |
 | session_id | uuid (FK) | |
 | week_id    | uuid (FK) | |
-| member_id  | uuid (FK) | Randomly selected EXCO |
+| member_id  | uuid (FK) | Randomly selected EXCO allocated to the session. For the **first session of each day** (the range opener), EXCOs with `allocations.running_late = true` are excluded from the random pool. If every allocated EXCO for that opener session is late, no row is written and the schedule UI shows "⚠ Teacher opens range". |
 
 ---
 
@@ -245,8 +248,11 @@ Run migrations in order using the Supabase SQL Editor or CLI.
 ### `week_status_type`
 - `open` — Preference submission window is open
 - `closed` — Deadline passed, draft not yet run
+- `drafting` — Draft is currently running (atomic lock; prevents concurrent runs)
 - `drafted` — Draft completed, awaiting publication
 - `published` — Schedule visible to members
+
+> The `drafting` value is added by migration `010_add_drafting_week_status.sql`. Older Supabase projects created from `001_initial_schema.sql` alone will be missing it — apply migration 010 before running the draft.
 
 ### `allocation_type`
 - `live` — Live fire slot

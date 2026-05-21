@@ -4,6 +4,7 @@ type AuditAction =
   | "member.create"
   | "member.archive"
   | "member.bulk_upload"
+  | "member.reset_password"
   | "role.promote"
   | "role.demote"
   | "presidency.transfer"

@@ -190,6 +190,16 @@ Before the Saturday draft, the system generates the default token pool for every
 
 For each training session, the system **randomly selects one EXCO member who is already training during that session** to be responsible for opening and closing the range.
 
+### Running-Late Constraint
+
+Members can declare they will arrive ~30 min late for a session — either at preference-submission time (via a per-session checkbox) or post-draft from their schedule. This flag is stored on the preference and propagated onto the resulting allocation.
+
+For the **first session of each day** (the range opener), the draft excludes any allocated EXCO whose flag is set from the random selection pool. If every allocated EXCO for the day's first session is running late, no EXCO is assigned and the schedule UI surfaces "⚠ Teacher opens range" so the teacher knows their physical presence is required. For all other sessions, the late flag is informational only — late EXCOs can still be selected, since closing the range and mid-session duty are unaffected by a late arrival.
+
+If a member toggles the flag from their schedule **after** the draft has run and they happen to be the assigned opener, the schedule action automatically reassigns duty to another non-late EXCO at the same session (or clears it if no replacement exists and surfaces a warning).
+
+EXCO members see a "~30 min late" badge next to a late member's name on the attendance page so they know not to mark the member absent prematurely.
+
 ---
 
 ## Authentication & Member Onboarding

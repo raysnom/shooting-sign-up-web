@@ -146,6 +146,126 @@ export async function cancelAllocation(allocationId: string) {
 }
 
 // ──────────────────────────────────────────────
+// Mark allocation as running late (or clear it)
+// ──────────────────────────────────────────────
+// Members indicate they will arrive ~30 min late (usually because a lesson
+// ends late). EXCO marking attendance can see the flag and avoid marking
+// absent. Constraint: a late member cannot be the EXCO on duty for the
+// first session of their day (the range opener). If they were, we reassign
+// duty to another EXCO allocated to that session — or clear the duty and
+// surface a warning if no replacement exists.
+
+export async function setRunningLate(
+  allocationId: string,
+  runningLate: boolean
+) {
+  const { error: authError, userId } = await verifyMember();
+  if (authError || !userId) return { error: authError ?? "Not authenticated" };
+  if (!isValidUUID(allocationId)) return { error: "Invalid allocation ID." };
+
+  const supabase = await createClient();
+  const admin = createAdminClient();
+
+  const { data: allocation, error: fetchError } = await supabase
+    .from("allocations")
+    .select("id, member_id, session_id, week_id, cancelled, sessions(day, time_start)")
+    .eq("id", allocationId)
+    .single<{
+      id: string;
+      member_id: string;
+      session_id: string;
+      week_id: string;
+      cancelled: boolean;
+      sessions: { day: string; time_start: string } | null;
+    }>();
+
+  if (fetchError || !allocation) {
+    return { error: "Allocation not found." };
+  }
+
+  if (allocation.member_id !== userId) {
+    return { error: "You do not own this allocation." };
+  }
+
+  if (allocation.cancelled) {
+    return { error: "This allocation is already cancelled." };
+  }
+
+  const { error: updateError } = await supabase
+    .from("allocations")
+    .update({
+      running_late: runningLate,
+      running_late_at: runningLate ? new Date().toISOString() : null,
+    })
+    .eq("id", allocationId);
+
+  if (updateError) {
+    return { error: sanitizeDbError(updateError) };
+  }
+
+  // If marking late, enforce the "no late EXCO on the day's first session" rule.
+  let warning: string | null = null;
+  if (runningLate && allocation.sessions) {
+    const { data: duty } = await admin
+      .from("exco_duty")
+      .select("id, session_id, week_id, member_id")
+      .eq("session_id", allocation.session_id)
+      .eq("week_id", allocation.week_id)
+      .eq("member_id", userId)
+      .maybeSingle();
+
+    if (duty) {
+      // Is this the first (earliest) session of its day for this week?
+      const { data: daySessions } = await admin
+        .from("sessions")
+        .select("id, time_start")
+        .eq("week_id", allocation.week_id)
+        .eq("day", allocation.sessions.day)
+        .eq("is_cancelled", false)
+        .order("time_start", { ascending: true })
+        .limit(1);
+
+      const isFirstOfDay =
+        daySessions && daySessions.length > 0 && daySessions[0].id === allocation.session_id;
+
+      if (isFirstOfDay) {
+        // Find a replacement: another EXCO allocated to the same session who
+        // isn't running late and hasn't cancelled.
+        const { data: candidates } = await admin
+          .from("allocations")
+          .select("member_id, members!inner(id, role)")
+          .eq("session_id", allocation.session_id)
+          .eq("week_id", allocation.week_id)
+          .eq("cancelled", false)
+          .eq("running_late", false)
+          .neq("member_id", userId)
+          .in("members.role", ["exco", "president"]);
+
+        const replacement = candidates && candidates.length > 0
+          ? candidates[Math.floor(Math.random() * candidates.length)]
+          : null;
+
+        if (replacement) {
+          await admin
+            .from("exco_duty")
+            .update({ member_id: replacement.member_id })
+            .eq("id", duty.id);
+          warning =
+            "EXCO duty for this session was reassigned because a late member can't open the range.";
+        } else {
+          await admin.from("exco_duty").delete().eq("id", duty.id);
+          warning =
+            "You were EXCO on duty for this session and no other EXCO is allocated to cover it. The range opener slot is now uncovered — please find a replacement.";
+        }
+      }
+    }
+  }
+
+  revalidatePath("/schedule");
+  return { success: true, warning };
+}
+
+// ──────────────────────────────────────────────
 // Submit absence reason (valid reason)
 // ──────────────────────────────────────────────
 

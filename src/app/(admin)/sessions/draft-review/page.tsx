@@ -103,6 +103,8 @@ export default async function DraftReviewPage({
         priority_score: a.priority_score as number,
         cancelled: a.cancelled as boolean,
         cancelled_at: a.cancelled_at as string | null,
+        running_late: (a.running_late as boolean | undefined) ?? false,
+        running_late_at: (a.running_late_at as string | null | undefined) ?? null,
         created_at: a.created_at as string,
         member_name: members?.name || "Unknown",
         session_name: sessionsJoin?.name || "Unknown",

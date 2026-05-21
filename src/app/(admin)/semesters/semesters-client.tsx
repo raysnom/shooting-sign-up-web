@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import type { Semester } from "@/types/database";
 import { createSemester, deleteSemester, resetNoShowCounts } from "./actions";
+import { formatDate } from "@/lib/utils/datetime";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,17 +23,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 
 const EMPTY_FORM = { name: "", start_date: "", end_date: "" };
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-SG", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 export function SemestersClient({ semesters }: { semesters: Semester[] }) {
   const [showCreate, setShowCreate] = useState(false);
@@ -117,87 +117,53 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Semesters</h1>
-        <div className="flex gap-2">
-          <Dialog open={showCreate} onOpenChange={setShowCreate}>
-            <DialogTrigger render={<Button />}>
-              Create Semester
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create New Semester</DialogTitle>
-                <DialogDescription>
-                  Add a new semester with a name and date range.
-                </DialogDescription>
-              </DialogHeader>
-              <form onSubmit={handleCreate} className="space-y-4">
+        <Dialog open={showCreate} onOpenChange={setShowCreate}>
+          <DialogTrigger render={<Button />}>
+            Create Semester
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create New Semester</DialogTitle>
+              <DialogDescription>
+                Add a new semester with a name and date range.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div className="space-y-2">
+                <Label>Name</Label>
+                <Input
+                  value={form.name}
+                  onChange={(e) => handleFormChange("name", e.target.value)}
+                  placeholder="e.g. Semester 1 2025"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Name</Label>
+                  <Label>Start Date</Label>
                   <Input
-                    value={form.name}
-                    onChange={(e) => handleFormChange("name", e.target.value)}
-                    placeholder="e.g. Semester 1 2025"
+                    type="date"
+                    value={form.start_date}
+                    onChange={(e) => handleFormChange("start_date", e.target.value)}
                     required
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Start Date</Label>
-                    <Input
-                      type="date"
-                      value={form.start_date}
-                      onChange={(e) => handleFormChange("start_date", e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>End Date</Label>
-                    <Input
-                      type="date"
-                      value={form.end_date}
-                      onChange={(e) => handleFormChange("end_date", e.target.value)}
-                      required
-                    />
-                  </div>
+                <div className="space-y-2">
+                  <Label>End Date</Label>
+                  <Input
+                    type="date"
+                    value={form.end_date}
+                    onChange={(e) => handleFormChange("end_date", e.target.value)}
+                    required
+                  />
                 </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading ? "Creating..." : "Create Semester"}
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog open={showReset} onOpenChange={setShowReset}>
-            <DialogTrigger render={<Button variant="destructive" />}>
-              Reset No-Show Counts
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Reset No-Show Counts</DialogTitle>
-                <DialogDescription>
-                  This will set the no-show count to 0 for all non-archived
-                  members. This is typically done at the start of a new
-                  semester. This action cannot be undone.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex gap-2 justify-end">
-                <Button
-                  variant="outline"
-                  onClick={handleCloseReset}
-                  disabled={loading}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={handleResetNoShows}
-                  disabled={loading}
-                >
-                  {loading ? "Resetting..." : "Confirm Reset"}
-                </Button>
               </div>
-            </DialogContent>
-          </Dialog>
-        </div>
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? "Creating..." : "Create Semester"}
+              </Button>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {message && (
@@ -252,6 +218,49 @@ export function SemestersClient({ semesters }: { semesters: Semester[] }) {
           </TableBody>
         </Table>
       </div>
+
+      <Card className="border-red-200">
+        <CardHeader>
+          <CardTitle className="text-red-600">Danger Zone</CardTitle>
+          <CardDescription>
+            Reset no-show counts for all active members. Typically done at the
+            start of a new semester.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Dialog open={showReset} onOpenChange={setShowReset}>
+            <DialogTrigger render={<Button variant="destructive" disabled={loading} />}>
+              Reset No-Show Counts
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Reset No-Show Counts</DialogTitle>
+                <DialogDescription>
+                  This will set the no-show count to 0 for all non-archived
+                  members. This is typically done at the start of a new
+                  semester. This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={handleCloseReset}
+                  disabled={loading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={handleResetNoShows}
+                  disabled={loading}
+                >
+                  {loading ? "Resetting..." : "Confirm Reset"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </CardContent>
+      </Card>
 
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
         <DialogContent>

@@ -59,6 +59,7 @@ export default async function PreferencesPage() {
       sessions={(sessions as Session[]) || []}
       existingPreferences={(preferences as Preference[]) || []}
       deadlinePassed={deadlinePassed}
+      userRole={member.role}
     />
   );
 }

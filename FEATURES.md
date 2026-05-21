@@ -7,15 +7,28 @@
 ## 📱 Member Dashboard (All Users)
 
 ### **Schedule**
-**Purpose:** View your weekly allocated training slots.
+**Purpose:** View your weekly allocated training slots and the full club roster for the week.
 
+Two tabs:
+
+**My Schedule** — your personal view
 - Shows all your confirmed live fire and dry fire sessions for the current week
 - Displays session times, types (live/dry), and gun assignments
 - **Gun clash warnings** appear as yellow banners if you share a gun with another member
 - Shows EXCO duty assignments (if you're selected to open/close the range)
+- **"I'll be ~30 min late" toggle** on each session card — tap when a lesson runs late so EXCO sees the heads-up at attendance time. If you toggle late on the day's first session and you were the EXCO opener, duty is reassigned to another EXCO automatically.
 - **Empty state:** If no schedule is published yet, shows "Schedule not yet available" message
 
-**When to use:** Check this every Saturday evening after 8pm to see your training schedule for the upcoming week.
+**Full Schedule** — the whole-club weekly grid
+- Days run across as columns (with dates); each session is a grey header row that lists the timing and spans the days that share it (e.g. Mon–Fri timing merges into one cell, Saturday's different timing sits separately under the Saturday column).
+- Members are listed in cells under each day — **live fire bold**, **dry fire italic grey**.
+- **Yellow cell** = that member has a shared-gun clash within the session. Hover the cell to see who they're sharing with.
+- **Amber `EXCO` pill** next to a name = that member is on EXCO duty to open/close the range for that session.
+- **Orange `LATE` pill** next to a name = that member has indicated they'll arrive ~30 min late.
+- If no EXCO is assigned to a session, the grey row shows **⚠ Teacher opens range** for the first session of the day and **⚠ Teacher closes range** for the last (so the teacher knows when their physical presence is required).
+- Your own name is highlighted in blue with a `(you)` tag.
+
+**When to use:** Check this every Saturday evening after 8pm to see your training schedule for the upcoming week, and use the Full Schedule tab to find out who else is shooting alongside you.
 
 ---
 
@@ -24,6 +37,7 @@
 
 - **Preference picker:** Click sessions to rank them in order (1 = top choice, 2 = second choice, etc.)
 - **Arrow buttons:** Reorder your preferences by moving them up/down
+- **"I'll be ~30 min late" checkbox** under each ranked session — tick when a lesson runs over the session start. The flag is carried onto your allocation so EXCO sees it on the attendance page. If you're EXCO and the session is the **first of the day** (range opener), the draft will not assign you opening duty for that session.
 - **Deadline countdown:** Shows time remaining until Saturday 5:00 PM cutoff
 - **Read-only after deadline:** Once the deadline passes, you can view but not edit your preferences
 - **Important:** If you don't submit preferences, you are **excluded entirely** from that week's draft
@@ -33,8 +47,9 @@
 **How it works:**
 1. Click on sessions you want to train in (for live fire)
 2. Drag to reorder by priority (#1 = most wanted)
-3. Submit before Saturday 5pm
-4. Wait for schedule publication (Saturday 8pm)
+3. Tick "I'll be ~30 min late" for any session where you know a lesson runs late
+4. Submit before Saturday 5pm
+5. Wait for schedule publication (Saturday 8pm)
 
 ---
 
@@ -74,6 +89,7 @@
 
 - **Select a week and session:** Dropdown to pick which session you're marking
 - **Member list:** Shows all members who were allocated to that session
+- **"~30 min late" badge** next to a member's name = they declared at preference time (or post-draft) that they'll arrive late. Wait before marking absent.
 - **Status options:**
   - **Present:** Member attended
   - **Absent:** Unexcused absence — increments `N` (no-show count) by 1

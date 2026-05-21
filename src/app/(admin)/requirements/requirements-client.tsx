@@ -11,6 +11,7 @@ import type {
   DivisionType,
 } from "@/types/database";
 import { TEAM_LABELS, DIVISION_LABELS, DIVISIONS } from "@/lib/constants";
+import { formatDate } from "@/lib/utils/datetime";
 import {
   createRequirement,
   updateRequirement,
@@ -61,14 +62,6 @@ const TARGET_TYPE_LABELS: Record<TrainingTargetType, string> = {
 // ──────────────────────────────────────────────
 // Helper functions
 // ──────────────────────────────────────────────
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-SG", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 function getWeekLabel(week: Week) {
   return `Week of ${formatDate(week.start_date)} - ${formatDate(week.end_date)}`;

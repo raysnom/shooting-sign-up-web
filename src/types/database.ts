@@ -91,6 +91,7 @@ export type Preference = {
   week_id: string;
   session_id: string;
   rank: number;
+  running_late: boolean;
   created_at: string;
 };
 
@@ -105,6 +106,8 @@ export type Allocation = {
   priority_score: number;
   cancelled: boolean;
   cancelled_at: string | null;
+  running_late: boolean;
+  running_late_at: string | null;
   created_at: string;
 };
 

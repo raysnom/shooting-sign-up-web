@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useMemo, useCallback, useOptimistic, useTransition } from "react";
-import type { Week, Session, Preference, DayType } from "@/types/database";
+import type { Week, Session, Preference, DayType, RoleType } from "@/types/database";
 import { DAY_LABELS } from "@/lib/constants";
+import { formatDate, formatTime, formatDeadline } from "@/lib/utils/datetime";
 import { submitPreferences } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -31,39 +32,6 @@ const DAY_ORDER: Record<DayType, number> = {
 };
 
 // ──────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────
-
-function formatTime(time: string) {
-  const [h, m] = time.split(":");
-  const hour = parseInt(h, 10);
-  const ampm = hour >= 12 ? "PM" : "AM";
-  const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-  return `${displayHour}:${m} ${ampm}`;
-}
-
-function formatDate(dateStr: string) {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-SG", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatDeadline(ts: string) {
-  const d = new Date(ts);
-  return d.toLocaleString("en-SG", {
-    weekday: "long",
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-// ──────────────────────────────────────────────
 // Component
 // ──────────────────────────────────────────────
 
@@ -72,19 +40,27 @@ export function PreferencesClient({
   sessions,
   existingPreferences,
   deadlinePassed,
+  userRole,
 }: {
   week: Week;
   sessions: Session[];
   existingPreferences: Preference[];
   deadlinePassed: boolean;
+  userRole: RoleType;
 }) {
+  const isExco = userRole === "exco" || userRole === "president";
   // Build initial rankings from existing preferences
   const initialRankedIds = existingPreferences
     .sort((a, b) => a.rank - b.rank)
     .map((p) => p.session_id)
     .filter((id) => sessions.some((s) => s.id === id));
 
+  const initialLateIds = new Set(
+    existingPreferences.filter((p) => p.running_late).map((p) => p.session_id)
+  );
+
   const [rankedIds, setRankedIds] = useState<string[]>(initialRankedIds);
+  const [lateIds, setLateIds] = useState<Set<string>>(initialLateIds);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [, startSubmitTransition] = useTransition();
@@ -139,6 +115,25 @@ export function PreferencesClient({
 
   const handleRemove = useCallback((sessionId: string) => {
     setRankedIds((prev) => prev.filter((id) => id !== sessionId));
+    setLateIds((prev) => {
+      if (!prev.has(sessionId)) return prev;
+      const next = new Set(prev);
+      next.delete(sessionId);
+      return next;
+    });
+    setMessage(null);
+  }, []);
+
+  const handleToggleLate = useCallback((sessionId: string) => {
+    setLateIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) {
+        next.delete(sessionId);
+      } else {
+        next.add(sessionId);
+      }
+      return next;
+    });
     setMessage(null);
   }, []);
 
@@ -172,6 +167,7 @@ export function PreferencesClient({
     const rankings = rankedIds.map((session_id, i) => ({
       session_id,
       rank: i + 1,
+      running_late: lateIds.has(session_id),
     }));
 
     startSubmitTransition(async () => {
@@ -186,7 +182,7 @@ export function PreferencesClient({
       }
       setLoading(false);
     });
-  }, [rankedIds, week.id, setOptimisticSavedCount]);
+  }, [rankedIds, lateIds, week.id, setOptimisticSavedCount]);
 
   // ──────────────────────────────────────────────
   // Interactive view (with warning if deadline passed)
@@ -239,14 +235,20 @@ export function PreferencesClient({
       <Card>
         <CardHeader>
           <CardTitle>Rank Your Sessions for Live Fire</CardTitle>
-          <CardDescription>
-            Click a session to add it to your rankings. Use the arrows to
-            reorder. Higher-ranked sessions are more likely to be allocated as
-            live fire. If you don&apos;t win live fire for a session, you will be
-            auto-assigned dry fire.
+          <CardDescription className="space-y-2">
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>Click a session to add it.</li>
+              <li>
+                Use the arrows to rank — your top choice gets live fire first.
+              </li>
+            </ol>
+            <p>
+              If you&apos;re allocated but don&apos;t win live fire, you fall
+              back to dry fire automatically.
+            </p>
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
             <div>
               <span className="text-muted-foreground">Deadline: </span>
@@ -266,6 +268,23 @@ export function PreferencesClient({
               )}
             </div>
           </div>
+
+          {isExco && (
+            <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              <Badge
+                variant="secondary"
+                className="shrink-0 bg-blue-100 text-blue-900"
+              >
+                EXCO
+              </Badge>
+              <p>
+                If a lesson runs over and you&apos;ll arrive ~30 min late, tick
+                &quot;I&apos;ll be ~30 min late&quot; on that session. If
+                it&apos;s the day&apos;s first session, you won&apos;t be
+                assigned to open the range.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -348,8 +367,9 @@ export function PreferencesClient({
               {rankedSessions.map((session, index) => (
                 <div
                   key={session.id}
-                  className="flex items-center gap-2 rounded-md border bg-white p-3"
+                  className="flex flex-col gap-2 rounded-md border bg-white p-3"
                 >
+                  <div className="flex items-center gap-2">
                   {/* Rank number */}
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
                     {index + 1}
@@ -436,6 +456,23 @@ export function PreferencesClient({
                       </svg>
                     </Button>
                   </div>
+                  </div>
+                  <label className="flex cursor-pointer items-center gap-2 pl-9 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 rounded border-gray-300"
+                      checked={lateIds.has(session.id)}
+                      onChange={() => handleToggleLate(session.id)}
+                    />
+                    <span>
+                      I&apos;ll be ~30 min late to this session
+                      {lateIds.has(session.id) && (
+                        <span className="ml-2 rounded bg-orange-100 px-1 font-semibold text-orange-800">
+                          LATE
+                        </span>
+                      )}
+                    </span>
+                  </label>
                 </div>
               ))}
             </div>

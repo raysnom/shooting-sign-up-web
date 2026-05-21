@@ -25,6 +25,7 @@ async function verifyMember() {
 type RankingInput = {
   session_id: string;
   rank: number;
+  running_late?: boolean;
 };
 
 export async function submitPreferences(
@@ -86,6 +87,7 @@ export async function submitPreferences(
       week_id: weekId,
       session_id: r.session_id,
       rank: r.rank,
+      running_late: r.running_late === true,
     }));
 
     const { error: insertError } = await supabase

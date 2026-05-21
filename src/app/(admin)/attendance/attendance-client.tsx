@@ -14,6 +14,7 @@ import type {
   SpecialEventAttendance,
 } from "@/types/database";
 import { DAY_LABELS } from "@/lib/constants";
+import { formatDate, formatTime } from "@/lib/utils/datetime";
 import {
   markAttendance,
   createSpecialEvent,
@@ -54,14 +55,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 
 type AllocationWithMember = Allocation & { member: Member };
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-SG", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 function getWeekLabel(week: Week) {
   return `Week of ${formatDate(week.start_date)} - ${formatDate(week.end_date)}`;
@@ -525,7 +518,7 @@ export function AttendanceClient({
                 <SelectValue placeholder="Select a session">
                   {(value) => {
                     const s = sessions.find((ses) => ses.id === value);
-                    return s ? `${s.name} (${s.time_start} - ${s.time_end})` : "Select a session";
+                    return s ? `${s.name} (${formatTime(s.time_start)} - ${formatTime(s.time_end)})` : "Select a session";
                   }}
                 </SelectValue>
               </SelectTrigger>
@@ -534,7 +527,7 @@ export function AttendanceClient({
                   <SelectGroup key={day}>
                     <SelectLabel>{DAY_LABELS[day] ?? day}</SelectLabel>
                     {daySessions.map((s) => {
-                      const sessionLabel = `${s.name} (${s.time_start} - ${s.time_end})`;
+                      const sessionLabel = `${s.name} (${formatTime(s.time_start)} - ${formatTime(s.time_end)})`;
                       return (
                         <SelectItem key={s.id} value={s.id}>
                           {sessionLabel}
@@ -640,7 +633,17 @@ export function AttendanceClient({
                   return (
                     <TableRow key={alloc.id}>
                       <TableCell className="font-medium">
-                        {alloc.member.name}
+                        <div className="flex items-center gap-2">
+                          <span>{alloc.member.name}</span>
+                          {alloc.running_late && (
+                            <Badge
+                              variant="outline"
+                              className="border-orange-300 bg-orange-50 text-orange-800"
+                            >
+                              ~30 min late
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge

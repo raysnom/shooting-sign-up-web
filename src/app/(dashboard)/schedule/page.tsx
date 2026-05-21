@@ -103,7 +103,6 @@ export default async function SchedulePage() {
     supabase
       .from("exco_duty")
       .select("*")
-      .eq("member_id", member.id)
       .eq("week_id", activeWeek.id),
   ]);
 

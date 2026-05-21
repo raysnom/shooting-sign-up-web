@@ -1,9 +1,14 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import type { Member, TeamType, LevelType, RoleType, DivisionType } from "@/types/database";
 import { DIVISION_MAP, DIVISION_LABELS } from "@/lib/constants";
-import { createMember, bulkUploadMembers, archiveMember } from "./actions";
+import {
+  createMember,
+  bulkUploadMembers,
+  archiveMember,
+  resetMemberPassword,
+} from "./actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +44,8 @@ import {
 const teams: TeamType[] = ["APW", "APM", "ARM", "ARW"];
 const levels: LevelType[] = ["JH1", "JH2", "JH3", "JH4", "SH1", "SH2"];
 const roles: RoleType[] = ["member", "exco", "president"];
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
+type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
 const INITIAL_FORM_STATE = {
   login_id: "",
@@ -61,9 +68,17 @@ export function MembersClient({ members }: { members: Member[] }) {
   const [filterDivision, setFilterDivision] = useState<DivisionType | "all">("all");
   const [archiveTarget, setArchiveTarget] = useState<Member | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const [resetTarget, setResetTarget] = useState<Member | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [resetResult, setResetResult] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const [form, setForm] = useState(INITIAL_FORM_STATE);
   const [csvContent, setCsvContent] = useState("");
+
+  // Pagination state
+  const [pageSize, setPageSize] = useState<PageSize>(25);
+  const [pageIndex, setPageIndex] = useState(0);
 
   // ──────────────────────────────────────────────
   // Memoized values
@@ -88,6 +103,22 @@ export function MembersClient({ members }: { members: Member[] }) {
       archivedCount: archived.length,
     };
   }, [members, filter, filterTeam, filterLevel, filterDivision]);
+
+  // Pagination derived values
+  const totalFiltered = filteredMembers.length;
+  const pageCount = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const safePageIndex = Math.min(pageIndex, pageCount - 1);
+  const startIndex = safePageIndex * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, totalFiltered);
+  const pagedMembers = useMemo(
+    () => filteredMembers.slice(startIndex, endIndex),
+    [filteredMembers, startIndex, endIndex],
+  );
+
+  // Reset to first page whenever filters / search change
+  useEffect(() => {
+    setPageIndex(0);
+  }, [filter, filterTeam, filterLevel, filterDivision, pageSize]);
 
   // ──────────────────────────────────────────────
   // Callbacks
@@ -121,6 +152,40 @@ export function MembersClient({ members }: { members: Member[] }) {
     setArchiving(false);
     setArchiveTarget(null);
   }, [archiveTarget]);
+
+  const handleResetConfirm = useCallback(async () => {
+    if (!resetTarget) return;
+
+    setResetting(true);
+    const result = await resetMemberPassword(resetTarget.id);
+    setResetting(false);
+
+    if ("error" in result && result.error) {
+      setMessageType("error");
+      setMessage(result.error);
+      setTimeout(() => setMessage(null), 5000);
+      setResetTarget(null);
+    } else if ("tempPassword" in result) {
+      setResetResult(result.tempPassword);
+    }
+  }, [resetTarget]);
+
+  const handleResetDialogClose = useCallback(() => {
+    setResetTarget(null);
+    setResetResult(null);
+    setCopied(false);
+  }, []);
+
+  const handleCopyTempPassword = useCallback(async () => {
+    if (!resetResult) return;
+    try {
+      await navigator.clipboard.writeText(resetResult);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }, [resetResult]);
 
   // ──────────────────────────────────────────────
   // Server actions
@@ -414,14 +479,14 @@ export function MembersClient({ members }: { members: Member[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredMembers.length === 0 ? (
+            {pagedMembers.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center text-gray-500">
                   No {filter} members found.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredMembers.map((member) => (
+              pagedMembers.map((member) => (
                 <TableRow key={member.id}>
                   <TableCell className="font-medium">{member.name}</TableCell>
                   <TableCell>{member.login_id}</TableCell>
@@ -437,14 +502,23 @@ export function MembersClient({ members }: { members: Member[] }) {
                   </TableCell>
                   <TableCell className="text-right">
                     {!member.archived && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-600 hover:text-red-700"
-                        onClick={() => setArchiveTarget(member)}
-                      >
-                        Archive
-                      </Button>
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setResetTarget(member)}
+                        >
+                          Reset Password
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700"
+                          onClick={() => setArchiveTarget(member)}
+                        >
+                          Archive
+                        </Button>
+                      </>
                     )}
                   </TableCell>
                 </TableRow>
@@ -452,6 +526,59 @@ export function MembersClient({ members }: { members: Member[] }) {
             )}
           </TableBody>
         </Table>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+        <div className="text-muted-foreground">
+          {totalFiltered === 0
+            ? "Showing 0 members"
+            : `Showing ${startIndex + 1}-${endIndex} of ${totalFiltered} member${totalFiltered !== 1 ? "s" : ""}`}
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="members-page-size" className="text-muted-foreground">
+              Rows per page
+            </Label>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => setPageSize(Number(v) as PageSize)}
+            >
+              <SelectTrigger id="members-page-size" className="w-[80px]" aria-label="Rows per page">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <span className="text-muted-foreground">
+            Page {totalFiltered === 0 ? 0 : safePageIndex + 1} of {totalFiltered === 0 ? 0 : pageCount}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPageIndex((i) => Math.max(0, i - 1))}
+              disabled={safePageIndex === 0 || totalFiltered === 0}
+              aria-label="Previous page"
+            >
+              Prev
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPageIndex((i) => Math.min(pageCount - 1, i + 1))}
+              disabled={safePageIndex >= pageCount - 1 || totalFiltered === 0}
+              aria-label="Next page"
+            >
+              Next
+            </Button>
+          </div>
+        </div>
       </div>
 
       <Dialog open={!!archiveTarget} onOpenChange={(open) => !open && setArchiveTarget(null)}>
@@ -478,6 +605,55 @@ export function MembersClient({ members }: { members: Member[] }) {
               {archiving ? "Archiving..." : "Archive"}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!resetTarget}
+        onOpenChange={(open) => !open && handleResetDialogClose()}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {resetResult ? "Password Reset" : "Reset Password"}
+            </DialogTitle>
+            <DialogDescription>
+              {resetResult
+                ? `${resetTarget?.name}'s password has been reset. Share this temporary password with them — they can change it on the set-password page after logging in.`
+                : `Reset the password for ${resetTarget?.name}? Their new password will be the default temp password.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {resetResult ? (
+            <div className="space-y-3">
+              <div className="rounded-md border bg-gray-50 p-3 font-mono text-sm break-all">
+                {resetResult}
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={handleCopyTempPassword}>
+                  {copied ? "Copied!" : "Copy"}
+                </Button>
+                <Button onClick={handleResetDialogClose}>Close</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setResetTarget(null)}
+                disabled={resetting}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleResetConfirm}
+                disabled={resetting}
+              >
+                {resetting ? "Resetting..." : "Reset Password"}
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

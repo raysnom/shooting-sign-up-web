@@ -20,6 +20,7 @@ export type DraftPreference = {
   member_id: string;
   session_id: string;
   rank: number;
+  running_late: boolean;
 };
 
 export type DraftMember = {
@@ -50,6 +51,7 @@ type ScoredMember = {
   member_id: string;
   score: number;
   gun_id: string | null;
+  running_late: boolean;
 };
 
 // ──────────────────────────────────────────────
@@ -63,6 +65,7 @@ export type DraftAllocation = {
   gun_id: string | null;
   gun_clash_warning: string | null;
   priority_score: number;
+  running_late: boolean;
 };
 
 export type DraftExcoDuty = {
@@ -194,6 +197,7 @@ export function runDraftEngine(input: DraftInput): DraftResult {
         member_id: pref.member_id,
         score,
         gun_id: memberGunMap.get(pref.member_id) ?? null,
+        running_late: pref.running_late,
       });
     }
 
@@ -258,6 +262,7 @@ export function runDraftEngine(input: DraftInput): DraftResult {
         gun_id: m.gun_id,
         gun_clash_warning: clashWarningMap.get(m.member_id) ?? null,
         priority_score: m.score,
+        running_late: m.running_late,
       });
 
       // 4f. Update currentLiveFires
@@ -288,6 +293,7 @@ export function runDraftEngine(input: DraftInput): DraftResult {
         gun_id: null,
         gun_clash_warning: null,
         priority_score: m.score,
+        running_late: m.running_late,
       });
     }
 
@@ -364,6 +370,7 @@ export function runDraftEngine(input: DraftInput): DraftResult {
         member_id: pref.member_id,
         score,
         gun_id: memberGunMap.get(pref.member_id) ?? null,
+        running_late: pref.running_late,
       });
     }
 
@@ -426,6 +433,7 @@ export function runDraftEngine(input: DraftInput): DraftResult {
         gun_id: m.gun_id,
         gun_clash_warning: clashWarningMap.get(m.member_id) ?? null,
         priority_score: m.score,
+        running_late: m.running_late,
       });
 
       // Update trackers
@@ -454,11 +462,14 @@ export function runDraftEngine(input: DraftInput): DraftResult {
         gun_id: null,
         gun_clash_warning: null,
         priority_score: m.score,
+        running_late: m.running_late,
       });
     }
   }
 
-  // 5. EXCO duty assignment
+  // 5. EXCO duty assignment.
+  // Late members cannot open the range, so they're filtered out of the
+  // pool for the first session of each day. Other sessions are unaffected.
   const excoDuties = assignExcoDuties({
     sessions: sortedSessions,
     allocations: allAllocations,

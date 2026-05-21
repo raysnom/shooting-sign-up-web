@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import type { Semester, Week, Session, WeekStatus } from "@/types/database";
 import { DAY_LABELS, DEFAULT_LIVE_LANES, DEFAULT_DRY_LANES, DAYS, DAY_ORDER } from "@/lib/constants";
+import { formatDate, formatTime, formatDeadline } from "@/lib/utils/datetime";
 import {
   createWeek,
   generateSessionsFromTemplates,
@@ -14,11 +17,6 @@ import {
   updateWeekStatus,
 } from "./actions";
 import { runDraft } from "./draft-actions";
-import {
-  generateTestPreferences,
-  generateTestAttendance,
-  clearTestData,
-} from "./test-data-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,6 +52,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 
 // ──────────────────────────────────────────────
 // Constants
@@ -87,37 +90,6 @@ type EditSessionForm = {
 };
 
 // ──────────────────────────────────────────────
-// Helpers
-// ──────────────────────────────────────────────
-
-function formatTime(time: string) {
-  const [h, m] = time.split(":");
-  const hour = parseInt(h, 10);
-  const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-  const ampm = hour >= 12 ? "PM" : "AM";
-  return `${displayHour}:${m} ${ampm}`;
-}
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-SG", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatDeadline(ts: string) {
-  return new Date(ts).toLocaleString("en-SG", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
-
-// ──────────────────────────────────────────────
 // Component
 // ──────────────────────────────────────────────
 
@@ -130,6 +102,8 @@ export function SessionsClient({
   weeks: Week[];
   sessions: Session[];
 }) {
+  const router = useRouter();
+
   // State
   const [selectedWeekId, setSelectedWeekId] = useState<string>(
     weeks.length > 0 ? weeks[0].id : ""
@@ -137,12 +111,25 @@ export function SessionsClient({
   const [showCreateWeek, setShowCreateWeek] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [editingSession, setEditingSession] = useState<Session | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Session | null>(null);
   const [loading, setLoading] = useState(false);
+  const [draftRunning, setDraftRunning] = useState(false);
+  const [draftElapsed, setDraftElapsed] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [messageType, setMessageType] = useState<"error" | "success">("success");
+
+  // Tick the elapsed-seconds counter while the draft is running
+  useEffect(() => {
+    if (!draftRunning) {
+      setDraftElapsed(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setDraftElapsed((e) => e + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [draftRunning]);
 
   // Create Week form
   const [createForm, setCreateForm] = useState<CreateWeekForm>({
@@ -314,85 +301,29 @@ export function SessionsClient({
     }
 
     setLoading(true);
+    setDraftRunning(true);
     setMessage(null);
 
-    const result = await runDraft(selectedWeekId);
+    try {
+      const result = await runDraft(selectedWeekId);
 
-    if ("error" in result && result.error) {
-      setMessageType("error");
-      setMessage(result.error);
-    } else if ("allocations" in result) {
-      setMessageType("success");
-      setMessage(
-        `Draft completed! ${result.allocations} allocations and ${result.excoDuties} EXCO duties assigned.`
-      );
-      setTimeout(() => setMessage(null), 5000);
+      if ("error" in result && result.error) {
+        setMessageType("error");
+        setMessage(result.error);
+      } else if ("allocations" in result) {
+        setMessageType("success");
+        setMessage(
+          `Draft completed! ${result.allocations} allocations and ${result.excoDuties} EXCO duties assigned.`
+        );
+        setTimeout(() => setMessage(null), 5000);
+        setDraftRunning(false);
+        router.push(`/sessions/draft-review?weekId=${selectedWeek.id}`);
+        return;
+      }
+    } finally {
+      setDraftRunning(false);
+      setLoading(false);
     }
-    setLoading(false);
-  }
-
-  async function handleGenerateTestPreferences() {
-    if (!selectedWeekId) return;
-    setLoading(true);
-    setMessage(null);
-
-    const result = await generateTestPreferences(selectedWeekId);
-
-    if ("error" in result && result.error) {
-      setMessageType("error");
-      setMessage(result.error);
-    } else if ("success" in result) {
-      setMessageType("success");
-      setMessage(
-        `Test data generated! ${result.totalPreferences} preferences for ${result.membersWithPreferences} members (${result.lateSubmissions} late).`
-      );
-      setTimeout(() => setMessage(null), 5000);
-    }
-    setLoading(false);
-  }
-
-  async function handleGenerateTestAttendance() {
-    if (!selectedWeekId) return;
-    setLoading(true);
-    setMessage(null);
-
-    const result = await generateTestAttendance(selectedWeekId);
-
-    if ("error" in result && result.error) {
-      setMessageType("error");
-      setMessage(result.error);
-    } else if ("success" in result) {
-      setMessageType("success");
-      setMessage(
-        `Test attendance generated! ${result.total} records: ${result.present} present, ${result.absent} absent, ${result.vr} VR, ${result.noShow} no-show.`
-      );
-      setTimeout(() => setMessage(null), 5000);
-    }
-    setLoading(false);
-  }
-
-  function openClearTestData() {
-    if (!selectedWeekId) return;
-    setShowClearConfirm(true);
-  }
-
-  async function handleClearTestData() {
-    if (!selectedWeekId) return;
-    setLoading(true);
-    setMessage(null);
-    setShowClearConfirm(false);
-
-    const result = await clearTestData(selectedWeekId);
-
-    if ("error" in result && result.error) {
-      setMessageType("error");
-      setMessage(result.error);
-    } else {
-      setMessageType("success");
-      setMessage("All test data cleared. Week reset to 'open'.");
-      setTimeout(() => setMessage(null), 5000);
-    }
-    setLoading(false);
   }
 
   // ──────────────────────────────────────────────
@@ -618,15 +549,36 @@ export function SessionsClient({
                         Generate from Templates
                       </Button>
                     )}
-                    <Button
-                      variant="outline"
-                      onClick={handleToggleWeekStatus}
-                      disabled={loading}
-                    >
-                      {selectedWeek.status === "open"
-                        ? "Close Week"
-                        : "Open Week"}
-                    </Button>
+                    {selectedWeek.status === "drafted" ||
+                    selectedWeek.status === "published" ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="outline"
+                              onClick={handleToggleWeekStatus}
+                              disabled
+                            >
+                              Open Week
+                            </Button>
+                          }
+                        />
+                        <TooltipContent>
+                          Cannot change status of a drafted/published week.
+                          Re-run the draft from scratch to make changes.
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        onClick={handleToggleWeekStatus}
+                        disabled={loading}
+                      >
+                        {selectedWeek.status === "open"
+                          ? "Close Week"
+                          : "Open Week"}
+                      </Button>
+                    )}
                     {selectedWeek.status === "closed" && (
                       <Button
                         variant="outline"
@@ -650,41 +602,6 @@ export function SessionsClient({
                       Delete Week
                     </Button>
                   </div>
-                  <>
-                      <Separator className="my-3" />
-                      <details className="mt-3">
-                        <summary className="text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground">
-                          Testing Tools
-                        </summary>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleGenerateTestPreferences}
-                            disabled={loading || weekSessions.length === 0}
-                          >
-                            {loading ? "Generating..." : "Generate Test Preferences"}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleGenerateTestAttendance}
-                            disabled={loading || selectedWeek.status !== "drafted" && selectedWeek.status !== "published"}
-                          >
-                            Generate Test Attendance
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-orange-600 hover:text-orange-700"
-                            onClick={openClearTestData}
-                            disabled={loading}
-                          >
-                            Clear All Test Data
-                          </Button>
-                        </div>
-                      </details>
-                  </>
                 </CardContent>
               </Card>
 
@@ -798,6 +715,39 @@ export function SessionsClient({
           )}
         </>
       )}
+
+      {/* ── Draft Progress Dialog ── */}
+      <Dialog
+        open={draftRunning}
+        onOpenChange={() => {
+          /* No-op: dialog can only close when draftRunning flips to false. */
+        }}
+        disablePointerDismissal
+      >
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Running Draft...</DialogTitle>
+            <DialogDescription>
+              We&apos;re matching members to live-fire and dry-fire lanes for
+              this week. This usually takes a few seconds &mdash; please
+              don&apos;t close this tab.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-4 py-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <ul className="text-sm text-muted-foreground space-y-1 text-center">
+              <li>Fetching members and preferences...</li>
+              <li>Computing priority scores...</li>
+              <li>Allocating live-fire and dry-fire lanes...</li>
+              <li>Resolving gun clashes...</li>
+              <li>Assigning EXCO duties...</li>
+            </ul>
+          </div>
+          <p className="text-xs text-muted-foreground text-center">
+            Elapsed: {draftElapsed}s
+          </p>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Edit Session Dialog ── */}
       <Dialog
@@ -944,26 +894,6 @@ export function SessionsClient({
             </Button>
             <Button disabled={loading} onClick={handleGenerateSessions}>
               {loading ? "Generating..." : "Generate Sessions"}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Clear Test Data Confirmation Dialog ── */}
-      <Dialog open={showClearConfirm} onOpenChange={setShowClearConfirm}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Clear All Test Data</DialogTitle>
-            <DialogDescription>
-              This will delete all preferences, allocations, attendance, and EXCO duties for this week, and reset the week to &quot;open&quot;. This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setShowClearConfirm(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" disabled={loading} onClick={handleClearTestData}>
-              {loading ? "Clearing..." : "Clear All Data"}
             </Button>
           </div>
         </DialogContent>

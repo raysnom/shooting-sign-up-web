@@ -5,7 +5,8 @@ import type { Week, Session, ExcoDuty, DayType } from "@/types/database";
 import type { AllocationWithSession, AllocationWithSessionAndMember } from "./page";
 import { DAY_LABELS, TEAM_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { cancelAllocation, submitAbsenceReason } from "./actions";
+import { formatDate, formatTime } from "@/lib/utils/datetime";
+import { cancelAllocation, submitAbsenceReason, setRunningLate } from "./actions";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -46,23 +47,6 @@ import {
 
 const DAY_ORDER: DayType[] = ["mon", "tue", "wed", "thu", "fri", "sat"];
 
-function formatDate(dateStr: string) {
-  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-SG", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatTime(timeStr: string) {
-  // timeStr is "HH:MM" or "HH:MM:SS"
-  const [h, m] = timeStr.split(":");
-  const hour = parseInt(h, 10);
-  const ampm = hour >= 12 ? "PM" : "AM";
-  const displayHour = hour % 12 || 12;
-  return `${displayHour}:${m} ${ampm}`;
-}
-
 type Timing = { timeStart: string; timeEnd: string };
 
 function sameTiming(a?: Timing, b?: Timing) {
@@ -71,22 +55,71 @@ function sameTiming(a?: Timing, b?: Timing) {
   return a.timeStart === b.timeStart && a.timeEnd === b.timeEnd;
 }
 
+type DayRole = "open" | "close" | "both" | "middle";
+
+type DayInfo = {
+  timing?: Timing;
+  hasSession: boolean;
+  hasEXCO: boolean;
+  role: DayRole;
+};
+
+const EMPTY_DAY_INFO: DayInfo = {
+  timing: undefined,
+  hasSession: false,
+  hasEXCO: false,
+  role: "open",
+};
+
+function teacherCoverText(role: DayRole) {
+  switch (role) {
+    case "open":
+      return "⚠ Teacher opens range";
+    case "close":
+      return "⚠ Teacher closes range";
+    case "both":
+      return "⚠ Teacher opens/closes range";
+    case "middle":
+      return "⚠ No EXCO on duty";
+  }
+}
+
+function sameDayInfo(a: DayInfo, b: DayInfo) {
+  if (!sameTiming(a.timing, b.timing)) return false;
+  // Empty days (no session) merge with anything timing-equivalent
+  if (!a.hasSession || !b.hasSession) return true;
+  return a.hasEXCO === b.hasEXCO && a.role === b.role;
+}
+
 function buildHeaderSegments(
   columns: { day: DayType }[],
-  timingByDay: Partial<Record<DayType, Timing>>
+  infoByDay: Partial<Record<DayType, DayInfo>>
 ) {
-  const segments: Array<{ key: string; span: number; timing?: Timing }> = [];
+  const segments: Array<{
+    key: string;
+    span: number;
+    timing?: Timing;
+    coverText: string | null;
+  }> = [];
   let i = 0;
   while (i < columns.length) {
     const col = columns[i];
-    const timing = timingByDay[col.day];
+    const info = infoByDay[col.day] ?? EMPTY_DAY_INFO;
     let span = 1;
     while (i + span < columns.length) {
-      const next = timingByDay[columns[i + span].day];
-      if (!sameTiming(timing, next)) break;
+      const next = infoByDay[columns[i + span].day] ?? EMPTY_DAY_INFO;
+      if (!sameDayInfo(info, next)) break;
       span++;
     }
-    segments.push({ key: col.day, span, timing });
+    segments.push({
+      key: col.day,
+      span,
+      timing: info.timing,
+      coverText:
+        info.hasSession && !info.hasEXCO
+          ? teacherCoverText(info.role)
+          : null,
+    });
     i += span;
   }
   return segments;
@@ -139,9 +172,28 @@ export function ScheduleClient({
   const [messageType, setMessageType] = useState<"error" | "success">("success");
   const [isPending, startTransition] = useTransition();
 
-  const [optimisticAllocations, removeOptimisticAllocation] = useOptimistic(
+  type AllocationAction =
+    | { kind: "cancel"; id: string }
+    | { kind: "late"; id: string; runningLate: boolean };
+
+  const [optimisticAllocations, applyOptimisticAllocation] = useOptimistic(
     allocations,
-    (state, cancelledId: string) => state.filter((a) => a.id !== cancelledId)
+    (state, action: AllocationAction) => {
+      if (action.kind === "cancel") return state.filter((a) => a.id !== action.id);
+      return state.map((a) =>
+        a.id === action.id ? { ...a, running_late: action.runningLate } : a
+      );
+    }
+  );
+
+  const [optimisticAllAllocations, applyOptimisticAllAllocation] = useOptimistic(
+    allAllocations,
+    (state, action: AllocationAction) => {
+      if (action.kind === "cancel") return state.filter((a) => a.id !== action.id);
+      return state.map((a) =>
+        a.id === action.id ? { ...a, running_late: action.runningLate } : a
+      );
+    }
   );
 
   // Cancel confirmation dialog state
@@ -153,7 +205,25 @@ export function ScheduleClient({
   const [reasonText, setReasonText] = useState("");
   const [reasonSubmitting, setReasonSubmitting] = useState(false);
 
+  // Sessions where the CURRENT user is on EXCO duty (used by My Schedule banner)
   const excoDutySessionIds = useMemo(
+    () =>
+      new Set(
+        excoDuties
+          .filter((d) => d.member_id === currentMemberId)
+          .map((d) => d.session_id)
+      ),
+    [excoDuties, currentMemberId]
+  );
+
+  // (session_id|member_id) pairs that are on EXCO duty — used for per-cell pill
+  const dutyByAllocation = useMemo(
+    () => new Set(excoDuties.map((d) => `${d.session_id}|${d.member_id}`)),
+    [excoDuties]
+  );
+
+  // Sessions that have at least one EXCO on duty
+  const sessionsWithDuty = useMemo(
     () => new Set(excoDuties.map((d) => d.session_id)),
     [excoDuties]
   );
@@ -168,13 +238,13 @@ export function ScheduleClient({
   // Build a map: session_id -> allocations for that session
   const allocationsBySession = useMemo(() => {
     const map = new Map<string, AllocationWithSessionAndMember[]>();
-    for (const alloc of allAllocations) {
+    for (const alloc of optimisticAllAllocations) {
       const list = map.get(alloc.session_id) || [];
       list.push(alloc);
       map.set(alloc.session_id, list);
     }
     return map;
-  }, [allAllocations]);
+  }, [optimisticAllAllocations]);
 
   // Week-day columns for the full-schedule grid: only days that have sessions
   const weekDayColumns = useMemo(() => {
@@ -218,9 +288,7 @@ export function ScheduleClient({
       const cellsByDay: Partial<
         Record<DayType, AllocationWithSessionAndMember[]>
       > = {};
-      const timingByDay: Partial<
-        Record<DayType, { timeStart: string; timeEnd: string }>
-      > = {};
+      const infoByDay: Partial<Record<DayType, DayInfo>> = {};
 
       for (const day of DAY_ORDER) {
         const daySessions = sessionsByDay.get(day);
@@ -233,16 +301,32 @@ export function ScheduleClient({
           return a.members.name.localeCompare(b.members.name);
         });
         cellsByDay[day] = sorted;
-        timingByDay[day] = {
-          timeStart: session.time_start,
-          timeEnd: session.time_end,
+
+        const total = daySessions?.length ?? 0;
+        const role: DayRole =
+          total === 1
+            ? "both"
+            : i === 0
+              ? "open"
+              : i === total - 1
+                ? "close"
+                : "middle";
+
+        infoByDay[day] = {
+          timing: {
+            timeStart: session.time_start,
+            timeEnd: session.time_end,
+          },
+          hasSession: true,
+          hasEXCO: sessionsWithDuty.has(session.id),
+          role,
         };
       }
 
       slots.push({
         key: `slot-${i}`,
         ordinal: i + 1,
-        timingByDay,
+        infoByDay,
         cellsByDay,
         maxRows: Math.max(
           0,
@@ -252,7 +336,7 @@ export function ScheduleClient({
     }
 
     return slots;
-  }, [sessions, allocationsBySession]);
+  }, [sessions, allocationsBySession, sessionsWithDuty]);
 
   const handleCancel = useCallback(
     (allocationId: string) => {
@@ -260,7 +344,8 @@ export function ScheduleClient({
       setCancellingId(allocationId);
 
       startTransition(async () => {
-        removeOptimisticAllocation(allocationId);
+        applyOptimisticAllocation({ kind: "cancel", id: allocationId });
+        applyOptimisticAllAllocation({ kind: "cancel", id: allocationId });
         const result = await cancelAllocation(allocationId);
         if (result.error) {
           setMessageType("error");
@@ -274,7 +359,34 @@ export function ScheduleClient({
         setCancelTarget(null);
       });
     },
-    [startTransition, removeOptimisticAllocation]
+    [startTransition, applyOptimisticAllocation, applyOptimisticAllAllocation]
+  );
+
+  const handleToggleLate = useCallback(
+    (allocationId: string, runningLate: boolean) => {
+      setMessage(null);
+      startTransition(async () => {
+        applyOptimisticAllocation({ kind: "late", id: allocationId, runningLate });
+        applyOptimisticAllAllocation({ kind: "late", id: allocationId, runningLate });
+        const result = await setRunningLate(allocationId, runningLate);
+        if (result.error) {
+          setMessageType("error");
+          setMessage(result.error);
+        } else if (result.warning) {
+          setMessageType("error");
+          setMessage(result.warning);
+        } else {
+          setMessageType("success");
+          setMessage(
+            runningLate
+              ? "Marked as running late. EXCO will see this when taking attendance."
+              : "Late status cleared."
+          );
+          setTimeout(() => setMessage(null), 5000);
+        }
+      });
+    },
+    [startTransition, applyOptimisticAllocation, applyOptimisticAllAllocation]
   );
 
   const openReasonDialog = useCallback((allocationId: string) => {
@@ -373,7 +485,7 @@ export function ScheduleClient({
               size="sm"
               onClick={() => cancelTarget && handleCancel(cancelTarget)}
             >
-              Confirm
+              Cancel My Slot
             </Button>
           </div>
         </DialogContent>
@@ -500,26 +612,54 @@ export function ScheduleClient({
                             </div>
                           )}
 
-                          {isLive && (
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                variant="destructive"
-                                size="sm"
-                                disabled={isCancelling}
-                                onClick={() => setCancelTarget(alloc.id)}
-                              >
-                                {isCancelling ? "Cancelling..." : "Cancel Slot"}
-                              </Button>
-
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => openReasonDialog(alloc.id)}
-                              >
-                                Provide Reason
-                              </Button>
+                          {alloc.running_late && (
+                            <div className="rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-xs text-orange-800">
+                              <span className="font-semibold">
+                                You marked yourself ~30 min late for this session.
+                              </span>{" "}
+                              EXCO will see this when taking attendance.
                             </div>
                           )}
+
+                          <div className="flex flex-wrap gap-2">
+                            {isLive && (
+                              <>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={isCancelling}
+                                  onClick={() => setCancelTarget(alloc.id)}
+                                >
+                                  {isCancelling ? "Cancelling..." : "Cancel Slot"}
+                                </Button>
+
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openReasonDialog(alloc.id)}
+                                >
+                                  Provide Reason
+                                </Button>
+                              </>
+                            )}
+
+                            <Button
+                              variant={alloc.running_late ? "default" : "outline"}
+                              size="sm"
+                              className={
+                                alloc.running_late
+                                  ? "bg-orange-600 text-white hover:bg-orange-700"
+                                  : ""
+                              }
+                              onClick={() =>
+                                handleToggleLate(alloc.id, !alloc.running_late)
+                              }
+                            >
+                              {alloc.running_late
+                                ? "Cancel Late Notice"
+                                : "I'll be ~30 min late"}
+                            </Button>
+                          </div>
                         </CardContent>
                       </Card>
                     );
@@ -540,7 +680,25 @@ export function ScheduleClient({
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
                 Live fire allocations are bold; dry fire allocations are shown
-                in italic grey.
+                in italic grey. Yellow cells indicate a shared-gun clash within
+                the session. An amber{" "}
+                <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">
+                  EXCO
+                </span>{" "}
+                tag marks the member on duty to open/close the range. When no
+                EXCO is assigned, the grey row shows{" "}
+                <span className="text-amber-700">
+                  ⚠ Teacher opens range
+                </span>{" "}
+                for the first session of the day and{" "}
+                <span className="text-amber-700">
+                  ⚠ Teacher closes range
+                </span>{" "}
+                for the last. An orange{" "}
+                <span className="rounded bg-orange-100 px-1 text-[10px] font-semibold text-orange-800">
+                  LATE
+                </span>{" "}
+                tag means the member will arrive ~30 min late.
               </p>
               <div className="overflow-x-auto rounded-md border bg-white">
                 <Table>
@@ -565,7 +723,7 @@ export function ScheduleClient({
                     {timeSlots.map((slot) => {
                       const segments = buildHeaderSegments(
                         weekDayColumns,
-                        slot.timingByDay
+                        slot.infoByDay
                       );
                       return (
                       <Fragment key={slot.key}>
@@ -580,13 +738,20 @@ export function ScheduleClient({
                                 colSpan={seg.span}
                                 className="font-semibold text-center"
                               >
-                                {idx === 0 ? (
-                                  <>
-                                    Session {slot.ordinal}
-                                    {timeLabel && ` (${timeLabel})`}
-                                  </>
-                                ) : (
-                                  timeLabel
+                                <div>
+                                  {idx === 0 ? (
+                                    <>
+                                      Session {slot.ordinal}
+                                      {timeLabel && ` (${timeLabel})`}
+                                    </>
+                                  ) : (
+                                    timeLabel
+                                  )}
+                                </div>
+                                {seg.coverText && (
+                                  <div className="mt-0.5 text-[11px] font-normal text-amber-700">
+                                    {seg.coverText}
+                                  </div>
                                 )}
                               </TableCell>
                             );
@@ -619,6 +784,18 @@ export function ScheduleClient({
                                   const isMe =
                                     alloc.member_id === currentMemberId;
                                   const isLive = alloc.type === "live";
+                                  const hasClash =
+                                    isLive && !!alloc.gun_clash_warning;
+                                  const onDuty = dutyByAllocation.has(
+                                    `${alloc.session_id}|${alloc.member_id}`
+                                  );
+                                  const baseTitle = `${
+                                    TEAM_LABELS[alloc.members.team] ??
+                                    alloc.members.team
+                                  } — ${isLive ? "Live Fire" : "Dry Fire"}`;
+                                  const title = hasClash
+                                    ? `${baseTitle}\nShared gun: ${alloc.gun_clash_warning}`
+                                    : baseTitle;
                                   return (
                                     <TableCell
                                       key={col.day}
@@ -627,14 +804,24 @@ export function ScheduleClient({
                                         isLive
                                           ? "font-medium"
                                           : "italic text-muted-foreground",
-                                        isMe && "bg-blue-50"
+                                        // gun-clash yellow wins over "me" blue
+                                        hasClash
+                                          ? "bg-yellow-50"
+                                          : isMe && "bg-blue-50"
                                       )}
-                                      title={`${
-                                        TEAM_LABELS[alloc.members.team] ??
-                                        alloc.members.team
-                                      } — ${isLive ? "Live Fire" : "Dry Fire"}`}
+                                      title={title}
                                     >
                                       {alloc.members.name}
+                                      {onDuty && (
+                                        <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">
+                                          EXCO
+                                        </span>
+                                      )}
+                                      {alloc.running_late && (
+                                        <span className="ml-1 rounded bg-orange-100 px-1 text-[10px] font-semibold text-orange-800">
+                                          LATE
+                                        </span>
+                                      )}
                                       {isMe && (
                                         <span className="ml-1 text-xs text-blue-600">
                                           (you)

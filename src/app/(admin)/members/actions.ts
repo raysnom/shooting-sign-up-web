@@ -44,9 +44,10 @@ async function verifyPresidentRole() {
   return { user };
 }
 
-function generateTempPassword(name: string): string {
-  const firstName = name.split(" ")[0];
-  return `${firstName}2026!`;
+const DEFAULT_TEMP_PASSWORD = "njcsc26!";
+
+function generateTempPassword(): string {
+  return DEFAULT_TEMP_PASSWORD;
 }
 
 type CreateMemberInput = {
@@ -74,7 +75,7 @@ export async function createMember(input: CreateMemberInput) {
     return { error: `Invalid level. Must be one of: ${VALID_LEVELS.join(", ")}` };
 
   const admin = createAdminClient();
-  const tempPassword = generateTempPassword(input.name);
+  const tempPassword = generateTempPassword();
 
   const { data: authUser, error: authError } =
     await admin.auth.admin.createUser({
@@ -174,7 +175,7 @@ export async function bulkUploadMembers(csvData: string) {
     }
     row.role = row.role ? row.role.toLowerCase() : "member";
 
-    const tempPassword = generateTempPassword(row.name);
+    const tempPassword = generateTempPassword();
 
     const { data: authUser, error: authError } =
       await admin.auth.admin.createUser({
@@ -243,4 +244,36 @@ export async function archiveMember(memberId: string) {
   revalidatePath("/members");
   updateTag("members");
   return { success: true };
+}
+
+export async function resetMemberPassword(memberId: string) {
+  const authResult = await verifyPresidentRole();
+  if ("error" in authResult) return authResult;
+
+  if (!isValidUUID(memberId)) return { error: "Invalid member ID." };
+
+  const admin = createAdminClient();
+
+  const { data: member, error: lookupError } = await admin
+    .from("members")
+    .select("id, name, email")
+    .eq("id", memberId)
+    .single();
+
+  if (lookupError || !member) return { error: "Member not found." };
+
+  const tempPassword = generateTempPassword();
+
+  const { error: updateError } = await admin.auth.admin.updateUserById(
+    member.id,
+    { password: tempPassword }
+  );
+
+  if (updateError) return { error: sanitizeDbError(updateError) };
+
+  await logAudit("member.reset_password", authResult.user.id, memberId, {
+    email: member.email,
+  });
+
+  return { success: true as const, tempPassword };
 }

@@ -84,18 +84,6 @@ export async function runDraft(weekId: string) {
     .single();
 
   if (lockError || !locked) {
-    console.error("[runDraft] Lock failed", {
-      weekId,
-      prevReadStatus: week.status,
-      lockError,
-      locked,
-    });
-    const { data: currentRow } = await admin
-      .from("weeks")
-      .select("id, status")
-      .eq("id", weekId)
-      .single();
-    console.error("[runDraft] Actual DB state after lock fail:", currentRow);
     return { error: "Draft is already in progress for this week." };
   }
 
@@ -132,7 +120,7 @@ export async function runDraft(weekId: string) {
   // 4. Fetch all preferences for these sessions (split on-time vs late)
   const { data: prefsRaw, error: prefsError } = await admin
     .from("preferences")
-    .select("member_id, session_id, rank, created_at")
+    .select("member_id, session_id, rank, created_at, running_late")
     .eq("week_id", weekId)
     .in("session_id", sessionIds);
 
@@ -152,6 +140,7 @@ export async function runDraft(weekId: string) {
       member_id: p.member_id as string,
       session_id: p.session_id as string,
       rank: p.rank as number,
+      running_late: (p.running_late as boolean | undefined) === true,
     };
 
     if (new Date(p.created_at as string) <= deadline) {
@@ -417,6 +406,7 @@ export async function runDraft(weekId: string) {
 
   // 10. Write allocations to the database (bulk insert)
   if (draftResult.allocations.length > 0) {
+    const nowIso = new Date().toISOString();
     const allocationRows = draftResult.allocations.map((a) => ({
       member_id: a.member_id,
       session_id: a.session_id,
@@ -426,6 +416,8 @@ export async function runDraft(weekId: string) {
       gun_clash_warning: a.gun_clash_warning,
       priority_score: a.priority_score,
       cancelled: false,
+      running_late: a.running_late,
+      running_late_at: a.running_late ? nowIso : null,
     }));
 
     const { error: insertAllocError } = await admin

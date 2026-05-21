@@ -35,6 +35,12 @@ yarn-error.log*
 # sensitive data
 member_passwords.txt
 members_import.csv
+members.csv
+members-names-emails.csv
+scripts/bulk-reset-passwords.mjs
+scripts/export-members.mjs
+scripts/export-names-emails.mjs
+scripts/create-tic.mjs
 
 # claude code local settings
 .claude/settings.local.json

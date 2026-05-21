@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { SessionTemplate, DayType } from "@/types/database";
 import { DAY_LABELS, DEFAULT_LIVE_LANES, DEFAULT_DRY_LANES } from "@/lib/constants";
+import { formatTime } from "@/lib/utils/datetime";
 import {
   createTemplate,
   updateTemplate,
@@ -39,15 +40,6 @@ import {
 } from "@/components/ui/select";
 
 const DAYS: DayType[] = ["mon", "tue", "wed", "thu", "fri", "sat"];
-
-function formatTime(time: string) {
-  // Convert "15:00" or "15:00:00" to "3:00 PM"
-  const [h, m] = time.split(":");
-  const hour = parseInt(h, 10);
-  const ampm = hour >= 12 ? "PM" : "AM";
-  const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-  return `${displayHour}:${m} ${ampm}`;
-}
 
 type TemplateForm = {
   name: string;

@@ -95,6 +95,7 @@
 - [x] Implement no-show detection — if member was allocated but marked absent without VR, increment `N`
 - [x] Build "provide reason" flow — member submits reason for absence
 - [x] Build end-of-week compliance report — flag members below min training requirement
+- [x] Running-late declaration — per-session checkbox at preference time + post-draft toggle on schedule; draft excludes late EXCOs from opening the range for the day's first session, and EXCO sees a "~30 min late" badge on the attendance page. Migrations `011`, `012`.
 
 ---
 
@@ -103,19 +104,32 @@
 **Goal:** Production-ready, deployed to Vercel.
 
 ### Polish Tasks
-- [ ] Responsive design pass — ensure mobile-friendly for students on phones
+- [x] Responsive design pass — sidebar collapses to off-canvas drawer below `md:` breakpoint; verified at build time, still needs hands-on testing on an actual phone
 - [x] Loading states — shared `Skeleton` component, route-group `loading.tsx` files for `(auth)`, `(dashboard)`, `(admin)`, plus page-specific loaders for `/profile`, `/schedule`, `/attendance`
 - [x] Caching — tagged `unstable_cache` helpers in `src/lib/cache.ts` for stable admin reads; `updateTag()` invalidation in admin server actions
 - [x] Optimistic UI — `useOptimistic` on cancel allocation, attendance marking, special-event toggling, preferences submit
 - [x] Tooltips — Base UI tooltip in `src/components/ui/tooltip.tsx`, applied to priority score factors and status badges
+- [x] Full Schedule grid — weekly day-column × session-row table in `/schedule` showing all allocations, with per-cell highlights for shared-gun clashes (yellow), EXCO-on-duty members (amber `EXCO` pill), and per-session "Teacher opens / closes range" notices when no EXCO is assigned
 - [ ] Error handling improvements — replace remaining technical errors with user-friendly messages
-- [ ] Bulk attendance upload (historical data)
+- [~] Bulk attendance upload (historical data) — **descoped**, club is starting fresh on this system
 - [~] Email notifications — **descoped**, members check the website directly
 
+### Additional polish (May 2026 session)
+- [x] Shared `src/lib/utils/datetime.ts` — replaced 9 inline `formatDate`/`formatTime` helpers; fixed UTC parsing bug in attendance/compliance/semesters/requirements pages
+- [x] Sessions page: "Testing Tools" block gated behind `NODE_ENV=development` (prevents accidental data wipe in prod)
+- [x] Sessions page: week-status toggle disabled on `drafted`/`published` weeks with explanatory tooltip
+- [x] Run Draft → Draft Review now auto-redirects on success (previously two-step manual handoff)
+- [x] Schedule page: cancel-slot dialog button relabelled "Cancel My Slot" (was generic "Confirm")
+- [x] Attendance page: session dropdown shows formatted 12-hour times (was raw `14:00:00`)
+- [x] Compliance page: removed redundant summary sentence duplicating the stat cards
+- [x] Semesters page: "Reset No-Show Counts" moved into a dedicated red-bordered Danger Zone card
+- [x] Preferences page: rewrote wall-of-text card description into a 2-step numbered list with EXCO-only running-late callout (role-gated)
+- [x] Page-specific loading skeletons added for `/preferences` and `/profile`
+
 ### Member Onboarding & Instructions
-- [ ] Write member-facing usage instructions (how to log in, set password, submit preferences, view schedule, cancel a slot, mark VR)
-- [ ] Add a prompt/banner asking members to **verify their email address is correct** on first login
-- [ ] Decide format: in-app help page (e.g. `/help`) vs. printable PDF vs. shared doc — pick one and link from sidebar
+- [~] Write member-facing usage instructions — in progress as an external Notion doc, shared with the club directly via existing channels (Slack/WhatsApp/etc.) rather than linked from the sidebar
+- [~] First-login "verify your email address is correct" banner — **deferred** for now
+- [x] Decided format: external Notion doc (not linked in-app; distributed by the club president directly)
 
 ### Deployment Tasks
 - [ ] Set up Vercel project
@@ -154,13 +168,13 @@ Ideas for future iterations:
 ## Known Issues & Tech Debt
 
 ### High Priority
-- [ ] **RLS on members table temporarily disabled** — Need to re-enable after testing. Run: `ALTER TABLE public.members ENABLE ROW LEVEL SECURITY;`
+- [x] **RLS on members table re-enabled** — migration `013_reenable_rls_members.sql` applied; all 6 documented policies (`members_select_own/_exco/_president`, `members_insert/update/delete_president`) verified in place
 
 ### Medium Priority
-- [x] **No loading states** — Added shared `Skeleton` component and per-route `loading.tsx` files
-- [ ] **No loading state on draft run** — Long-running draft action still needs a progress indicator
+- [x] **No loading states** — Added shared `Skeleton` component and per-route `loading.tsx` files (incl. preferences, profile)
+- [x] **Draft progress indicator** — modal dialog with spinner, expected-steps list, and elapsed-seconds counter; closes automatically on completion
 - [ ] **Error messages not user-friendly** — Replace technical errors with clear user guidance
-- [ ] **No pagination on member list** — Will be slow with >100 members
+- [x] **Member list pagination** — client-side, filter-aware, 25/50/100 page sizes
 
 ### Low Priority
 - [ ] **No dark mode** — Future nice-to-have
@@ -185,10 +199,8 @@ Ideas for future iterations:
 
 ## Next Steps
 
-1. **End-to-end testing** — Full user flow from preference submission to schedule publication (current focus)
-2. **Write member usage instructions** — Including "verify your email" step on first login
-3. **Re-enable RLS on members table** — Critical security fix
-4. **Responsive design pass** — Test on mobile devices
-5. **Set up Vercel deployment** — Configure production environment
-6. **User acceptance testing** — Get feedback from actual club members
-7. **Production launch** — Deploy and monitor first live draft cycle
+1. **Hands-on mobile testing** — Verify the new off-canvas sidebar drawer + key member flows on an actual phone
+2. **Finalize Notion member guide** — Cover login, set-password, preferences, schedule, cancellation, VR; share with the club via existing channels
+3. **Set up Vercel deployment** — Project creation, GitHub connection, env vars (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`)
+4. **End-to-end testing on the deployed URL** — Full user flow from preference submission through draft to schedule publication
+5. **Production launch** — Monitor the first live draft cycle and gather member feedback

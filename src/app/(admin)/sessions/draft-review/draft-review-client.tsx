@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Week, Session } from "@/types/database";
 import type { AllocationWithDetails, ExcoDutyWithDetails } from "./page";
 import { DAY_LABELS, DAYS, DAY_ORDER } from "@/lib/constants";
+import { formatDate, formatTime } from "@/lib/utils/datetime";
 import { publishWeek, rerunDraft } from "./actions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,22 +40,6 @@ import {
 const PUBLISH_REDIRECT_DELAY_MS = 1500;
 const DRAFT_REDIRECT_DELAY_MS = 1500;
 const SUCCESS_MESSAGE_AUTO_DISMISS_MS = 5000;
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr + "T00:00:00").toLocaleDateString("en-SG", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatTime(time: string) {
-  const [h, m] = time.split(":");
-  const hour = parseInt(h, 10);
-  const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-  const ampm = hour >= 12 ? "PM" : "AM";
-  return `${displayHour}:${m} ${ampm}`;
-}
 
 // ──────────────────────────────────────────────
 // Component

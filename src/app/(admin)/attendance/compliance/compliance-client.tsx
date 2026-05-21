@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import type { Week, TeamType, LevelType } from "@/types/database";
 import { TEAM_LABELS } from "@/lib/constants";
+import { formatDate } from "@/lib/utils/datetime";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,14 +25,6 @@ type ComplianceMember = {
   requiredSessions: number;
   attendedSessions: number;
 };
-
-function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-SG", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 export function ComplianceClient({
   week,
@@ -98,11 +91,6 @@ export function ComplianceClient({
           </CardContent>
         </Card>
       </div>
-
-      <p className="text-sm text-muted-foreground">
-        {metCount} of {totalCount} members met their training requirements this
-        week.
-      </p>
 
       {/* Compliance Table */}
       <div className="rounded-md border bg-white">

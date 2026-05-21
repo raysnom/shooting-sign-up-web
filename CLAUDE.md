@@ -122,10 +122,7 @@ npm install
 
 1. Create a Supabase project at [supabase.com](https://supabase.com)
 2. Copy your project URL and keys to `.env.local`
-3. Run migrations in Supabase SQL Editor:
-   - `supabase/migrations/001_initial_schema.sql`
-   - `supabase/migrations/002_rls_policies.sql`
-   - `supabase/migrations/003_add_max_live_per_member.sql`
+3. Run **all** migrations in `supabase/migrations/` in numeric order (001 → 010+). The SQL Editor accepts each file's contents directly. Skipping a migration causes runtime errors — e.g., `week_status` enum is missing `'drafting'` without migration 010, breaking the draft lock.
 
 ### 3. Run Development Server
 
@@ -291,6 +288,16 @@ President defines session templates once. Each week auto-generates sessions from
 ### shadcn/ui Component Errors
 - **`asChild` prop not working**: Use `render={<Component />}` instead (shadcn v4 uses Base UI)
 - **`toast` not working**: Use `sonner` component instead (toast is deprecated)
+
+### "Draft is already in progress for this week."
+- Underlying cause is usually missing migration 010 — the `week_status` enum lacks the `'drafting'` value, so the atomic lock update silently affects 0 rows.
+- Verify with: `SELECT unnest(enum_range(NULL::week_status));` — you should see `drafting` in the list.
+- Fix: `ALTER TYPE week_status ADD VALUE IF NOT EXISTS 'drafting';` (or run migration `010_add_drafting_week_status.sql`).
+- If the enum already has `drafting`, the week is genuinely locked. Reset it: `UPDATE weeks SET status = 'closed' WHERE id = '<week-id>';`
+
+### Supabase project paused (DNS NXDOMAIN)
+- Free-tier projects pause after ~7 days of inactivity. Symptom: localhost hangs, dev server logs `AuthRetryableFetchError: fetch failed`, and `Resolve-DnsName <project>.supabase.co` returns NXDOMAIN.
+- Fix: open dashboard, click **Resume**, wait for status `Healthy`. No dev server restart needed.
 
 ---
 
