@@ -147,11 +147,13 @@ export async function cancelAllocation(allocationId: string) {
 }
 
 // ──────────────────────────────────────────────
-// Claim a leftover slot (for members who didn't submit preferences)
+// Claim a leftover slot
 // ──────────────────────────────────────────────
-// Members who did NOT submit any preferences for the week can claim leftover
-// capacity in published sessions. System auto-prefers live fire and falls back
-// to dry. The week cap (max_live_per_member) still applies to live claims.
+// Any member can claim leftover capacity in a published week — including those
+// who submitted preferences but cancelled an allocation and want back in.
+// System auto-prefers live fire and falls back to dry. The week cap
+// (max_live_per_member) still applies to live claims, and a member cannot
+// double-book a session they already hold an active allocation for.
 // Supabase has no full transactions; we accept that a race could cause a
 // 1-slot oversubscription. We mitigate by re-checking counts immediately
 // before insert.
@@ -197,20 +199,6 @@ export async function claimLeftoverSlot(
   }
 
   const weekId = week.id;
-
-  // Caller must have submitted no preferences for this week
-  const { data: existingPrefs } = await supabase
-    .from("preferences")
-    .select("id")
-    .eq("member_id", userId)
-    .eq("week_id", weekId)
-    .limit(1);
-  if (existingPrefs && existingPrefs.length > 0) {
-    return {
-      error:
-        "Only members who did not submit preferences can claim leftover slots.",
-    };
-  }
 
   // Caller must not already hold an active allocation for this session
   const { data: existingAlloc } = await supabase

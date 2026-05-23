@@ -134,7 +134,6 @@ interface ScheduleClientProps {
   sessions: Session[];
   excoDuties: ExcoDuty[];
   currentMemberId: string;
-  submittedPrefs: boolean;
 }
 
 export function ScheduleClient({
@@ -144,7 +143,6 @@ export function ScheduleClient({
   sessions,
   excoDuties,
   currentMemberId,
-  submittedPrefs,
 }: ScheduleClientProps) {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -352,10 +350,11 @@ export function ScheduleClient({
     [optimisticAllocations]
   );
 
-  // Leftover capacity per session (only meaningful when the member is eligible
-  // to claim, i.e. didn't submit prefs and the week is published).
+  // Leftover capacity per session. Any member can claim leftovers once the
+  // week is published — including those who cancelled an allocation and want
+  // back in. Sessions the member already holds are filtered at the button.
   const leftoverSessions = useMemo(() => {
-    if (submittedPrefs || week.status !== "published") return [];
+    if (week.status !== "published") return [];
 
     return sessions
       .map((session) => {
@@ -373,7 +372,7 @@ export function ScheduleClient({
         if (dayOrderA !== dayOrderB) return dayOrderA - dayOrderB;
         return a.session.time_start.localeCompare(b.session.time_start);
       });
-  }, [submittedPrefs, week.status, sessions, allocationsBySession]);
+  }, [week.status, sessions, allocationsBySession]);
 
   const handleClaim = useCallback(
     (sessionId: string) => {
@@ -621,17 +620,17 @@ export function ScheduleClient({
               </div>
             )}
 
-            {/* ── Leftover slots (only for non-submitters in a published week) ── */}
-            {!submittedPrefs &&
-              week.status === "published" &&
+            {/* ── Leftover slots (claimable by any member in a published week) ── */}
+            {week.status === "published" &&
               leftoverSessions.length > 0 && (
                 <Card>
                   <CardHeader>
                     <CardTitle>Available Leftover Slots</CardTitle>
                     <CardDescription>
-                      You didn&rsquo;t submit preferences for this week, but you
-                      can still claim any leftover slots below. The system gives
-                      you live fire if available, dry fire otherwise.
+                      Claim any leftover slot below — handy if you cancelled an
+                      allocation and want back in, or didn&rsquo;t submit
+                      preferences this week. The system gives you live fire if
+                      available, dry fire otherwise.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
