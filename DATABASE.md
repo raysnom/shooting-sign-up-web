@@ -170,7 +170,7 @@
 | id         | uuid (PK) | |
 | session_id | uuid (FK) | |
 | week_id    | uuid (FK) | |
-| member_id  | uuid (FK) | Randomly selected EXCO allocated to the session. For the **first session of each day** (the range opener), EXCOs with `allocations.running_late = true` are excluded from the random pool. If every allocated EXCO for that opener session is late, no row is written and the schedule UI shows "⚠ Teacher opens range". |
+| member_id  | uuid (FK) | EXCO allocated to the session, chosen by load-balanced (least-loaded-first) selection so weekly duties spread evenly across EXCOs; ties broken randomly. For the **first session of each day** (the range opener), EXCOs with `allocations.running_late = true` are excluded from the pool. If every allocated EXCO for that opener session is late, no row is written and the schedule UI shows a "↑ TIC opens range" row at the top of that day's column. |
 
 ---
 

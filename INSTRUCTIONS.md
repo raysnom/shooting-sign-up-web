@@ -46,9 +46,9 @@ If you didn't submit preferences for the week, open *Schedule* once the draft is
 
 ❌ *Cancel a slot*
 1. Open *Schedule*
-2. Click *Cancel My Slot*
-3. Must be at least *24 hours* before the session
-A dry-fire member gets auto-promoted to your lane.
+2. Click *Cancel Slot* on the session card (works for both live fire *and* dry fire slots)
+3. Confirm — must be at least *24 hours* before the session
+Cancelling withdraws you from that session completely. If it was a live fire slot, the top dry-fire member gets auto-promoted into your lane.
 
 🚫 *Last-minute can't make it?*
 If you're allocated but can't attend:

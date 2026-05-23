@@ -26,7 +26,7 @@ Two tabs:
 - **Yellow cell** = that member has a shared-gun clash within the session. Hover the cell to see who they're sharing with.
 - **Amber `EXCO` pill** next to a name = that member is on EXCO duty to open/close the range for that session.
 - **Orange `LATE` pill** next to a name = that member has indicated they'll arrive ~30 min late.
-- If no EXCO is assigned to a session, the grey row shows **⚠ Teacher opens range** for the first session of the day and **⚠ Teacher closes range** for the last (so the teacher knows when their physical presence is required).
+- If the day's first or last session has no EXCO on duty, an amber **↑ TIC opens range** row appears at the top of that day's column and a **↓ TIC closes range** row at the bottom — so the TIC (Teacher-in-Charge) knows when their physical presence is required to open or close the range.
 - Your own name is highlighted in blue with a `(you)` tag.
 
 **When to use:** Check this every Saturday evening after 8pm to see your training schedule for the upcoming week, and use the Full Schedule tab to find out who else is shooting alongside you.
@@ -74,10 +74,10 @@ Two tabs:
 **Purpose:** Cancel an allocated slot (≥24 hours before the session).
 
 - **View upcoming allocations:** See all your confirmed sessions for the week
-- **Cancel a slot:** Click "Cancel" next to a session to remove it from your schedule
+- **Cancel any slot:** Click "Cancel Slot" on a session card to withdraw from it. This works for **both live fire and dry fire** slots — cancelling removes you from the session entirely (you are *not* downgraded to dry fire)
 - **24-hour rule:** You can only cancel if there's ≥24 hours until the session starts
 - **No penalty:** Cancelling with ≥24hrs notice does **not** affect your priority score
-- **Auto-upgrade:** When you cancel a live fire slot, the highest-scoring dry fire member in that session is automatically upgraded
+- **Auto-upgrade:** When you cancel a **live fire** slot, the highest-scoring dry fire member in that session is automatically promoted into your vacated lane. Cancelling a dry fire slot just frees the dry lane (no promotion)
 
 **When to use:** If you can't make a training session due to illness, family emergency, school event, etc. Always cancel as soon as you know you can't attend!
 

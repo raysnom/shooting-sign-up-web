@@ -152,8 +152,9 @@ Members who **did** submit preferences (even if they only got 0 allocations) are
 
 ### Cancellations (≥ 24 hours before session)
 
+- Members can cancel **either a live fire or a dry fire** allocation. Cancelling is a full withdrawal from that session — the member is removed entirely, not downgraded to dry fire.
 - No penalty applied.
-- The vacated live fire lane is immediately offered to the **highest-scoring dry fire member** in that same session, who is auto-upgraded.
+- When a **live fire** lane is vacated, it is immediately offered to the **highest-scoring dry fire member** in that same session, who is auto-upgraded. Cancelling a **dry fire** slot simply frees that dry lane (no auto-upgrade).
 
 ### No-Shows
 
@@ -213,13 +214,17 @@ Before the Saturday draft, the system generates the default token pool for every
 
 ## EXCO on Duty
 
-For each training session, the system **randomly selects one EXCO member who is already training during that session** to be responsible for opening and closing the range.
+For each training session, the system **selects one EXCO member who is already training during that session** to be responsible for opening and closing the range.
+
+### Fair Distribution
+
+Selection is **load-balanced across the week** rather than independently random per session. Sessions are processed in order, and each one's duty goes to the eligible EXCO who has the fewest duties so far that week; ties are broken randomly. This keeps the spread between the busiest and least-busy EXCO to at most one, so with `N` duty-sessions and `K` eligible EXCOs each member ends up with either `floor(N/K)` or `ceil(N/K)` duties — i.e. everyone opens/closes roughly once or twice a week instead of one unlucky EXCO piling up many duties. Because ties are random, re-running the draft won't always reproduce the identical assignment.
 
 ### Running-Late Constraint
 
 Members can declare they will arrive ~30 min late for a session — either at preference-submission time (via a per-session checkbox) or post-draft from their schedule. This flag is stored on the preference and propagated onto the resulting allocation.
 
-For the **first session of each day** (the range opener), the draft excludes any allocated EXCO whose flag is set from the random selection pool. If every allocated EXCO for the day's first session is running late, no EXCO is assigned and the schedule UI surfaces "⚠ Teacher opens range" so the teacher knows their physical presence is required. For all other sessions, the late flag is informational only — late EXCOs can still be selected, since closing the range and mid-session duty are unaffected by a late arrival.
+For the **first session of each day** (the range opener), the draft excludes any allocated EXCO whose flag is set from the selection pool (the load-balancing then runs over the remaining non-late candidates). If every allocated EXCO for the day's first session is running late, no EXCO is assigned and the schedule UI surfaces a "↑ TIC opens range" row at the top of that day's column so the TIC (Teacher-in-Charge) knows their physical presence is required. For all other sessions, the late flag is informational only — late EXCOs can still be selected, since closing the range and mid-session duty are unaffected by a late arrival.
 
 If a member toggles the flag from their schedule **after** the draft has run and they happen to be the assigned opener, the schedule action automatically reassigns duty to another non-late EXCO at the same session (or clears it if no replacement exists and surfaces a warning).
 

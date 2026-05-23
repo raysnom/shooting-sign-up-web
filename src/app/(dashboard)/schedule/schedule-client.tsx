@@ -60,40 +60,21 @@ function sameTiming(a?: Timing, b?: Timing) {
   return a.timeStart === b.timeStart && a.timeEnd === b.timeEnd;
 }
 
-type DayRole = "open" | "close" | "both" | "middle";
-
 type DayInfo = {
   timing?: Timing;
   hasSession: boolean;
-  hasEXCO: boolean;
-  role: DayRole;
 };
 
 const EMPTY_DAY_INFO: DayInfo = {
   timing: undefined,
   hasSession: false,
-  hasEXCO: false,
-  role: "open",
 };
 
-function teacherCoverText(role: DayRole) {
-  switch (role) {
-    case "open":
-      return "⚠ Teacher opens range";
-    case "close":
-      return "⚠ Teacher closes range";
-    case "both":
-      return "⚠ Teacher opens/closes range";
-    case "middle":
-      return "⚠ No EXCO on duty";
-  }
-}
-
 function sameDayInfo(a: DayInfo, b: DayInfo) {
-  if (!sameTiming(a.timing, b.timing)) return false;
-  // Empty days (no session) merge with anything timing-equivalent
+  // Empty days (no session at this ordinal) merge with anything so the grey
+  // time header can span across them instead of leaving stray empty cells.
   if (!a.hasSession || !b.hasSession) return true;
-  return a.hasEXCO === b.hasEXCO && a.role === b.role;
+  return sameTiming(a.timing, b.timing);
 }
 
 function buildHeaderSegments(
@@ -104,7 +85,6 @@ function buildHeaderSegments(
     key: string;
     span: number;
     timing?: Timing;
-    coverText: string | null;
   }> = [];
   let i = 0;
   while (i < columns.length) {
@@ -116,15 +96,7 @@ function buildHeaderSegments(
       if (!sameDayInfo(info, next)) break;
       span++;
     }
-    segments.push({
-      key: col.day,
-      span,
-      timing: info.timing,
-      coverText:
-        info.hasSession && !info.hasEXCO
-          ? teacherCoverText(info.role)
-          : null,
-    });
+    segments.push({ key: col.day, span, timing: info.timing });
     i += span;
   }
   return segments;
@@ -205,6 +177,10 @@ export function ScheduleClient({
 
   // Cancel confirmation dialog state
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
+  const cancelTargetIsLive = useMemo(
+    () => optimisticAllocations.find((a) => a.id === cancelTarget)?.type === "live",
+    [cancelTarget, optimisticAllocations]
+  );
 
   // Leftover-claim state — id of the session currently being claimed (for the spinner)
   const [claimingSessionId, setClaimingSessionId] = useState<string | null>(null);
@@ -312,24 +288,12 @@ export function ScheduleClient({
         });
         cellsByDay[day] = sorted;
 
-        const total = daySessions?.length ?? 0;
-        const role: DayRole =
-          total === 1
-            ? "both"
-            : i === 0
-              ? "open"
-              : i === total - 1
-                ? "close"
-                : "middle";
-
         infoByDay[day] = {
           timing: {
             timeStart: session.time_start,
             timeEnd: session.time_end,
           },
           hasSession: true,
-          hasEXCO: sessionsWithDuty.has(session.id),
-          role,
         };
       }
 
@@ -346,7 +310,35 @@ export function ScheduleClient({
     }
 
     return slots;
-  }, [sessions, allocationsBySession, sessionsWithDuty]);
+  }, [sessions, allocationsBySession]);
+
+  // Per-day range-opening/closing coverage. The opener is the day's first
+  // session and the closer is its last; if either has no EXCO on duty, the
+  // TIC is responsible for that action (surfaced as a row at the top/bottom
+  // of the grid rather than buried in the per-session header).
+  const dayCoverage = useMemo(() => {
+    const sessionsByDay = new Map<DayType, Session[]>();
+    for (const session of sessions) {
+      const list = sessionsByDay.get(session.day as DayType) || [];
+      list.push(session);
+      sessionsByDay.set(session.day as DayType, list);
+    }
+    const coverage: Partial<
+      Record<DayType, { opensNeedTIC: boolean; closesNeedTIC: boolean }>
+    > = {};
+    for (const [day, list] of sessionsByDay) {
+      const sorted = [...list].sort((a, b) =>
+        a.time_start.localeCompare(b.time_start)
+      );
+      const first = sorted[0];
+      const last = sorted[sorted.length - 1];
+      coverage[day] = {
+        opensNeedTIC: !!first && !sessionsWithDuty.has(first.id),
+        closesNeedTIC: !!last && !sessionsWithDuty.has(last.id),
+      };
+    }
+    return coverage;
+  }, [sessions, sessionsWithDuty]);
 
   // Sessions where the current user already has an active allocation —
   // used to disable the "Claim" button for those sessions.
@@ -416,7 +408,7 @@ export function ScheduleClient({
           setMessage(result.error);
         } else {
           setMessageType("success");
-          setMessage("Slot cancelled successfully. You have been moved to dry fire.");
+          setMessage("Slot cancelled. You have been withdrawn from this session.");
           setTimeout(() => setMessage(null), 5000);
         }
         setCancellingId(null);
@@ -529,10 +521,13 @@ export function ScheduleClient({
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cancel Live Fire Slot</DialogTitle>
+            <DialogTitle>
+              Cancel {cancelTargetIsLive ? "Live Fire" : "Dry Fire"} Slot
+            </DialogTitle>
             <DialogDescription>
-              Are you sure you want to cancel this live fire slot? You will be
-              moved to dry fire.
+              {cancelTargetIsLive
+                ? "Are you sure you want to cancel this live fire slot? You will be withdrawn from this session, and the slot will be offered to the next member on dry fire."
+                : "Are you sure you want to cancel this dry fire slot? You will be withdrawn from this session."}
             </DialogDescription>
           </DialogHeader>
 
@@ -756,25 +751,23 @@ export function ScheduleClient({
                           )}
 
                           <div className="flex flex-wrap gap-2">
-                            {isLive && (
-                              <>
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  disabled={isCancelling}
-                                  onClick={() => setCancelTarget(alloc.id)}
-                                >
-                                  {isCancelling ? "Cancelling..." : "Cancel Slot"}
-                                </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              disabled={isCancelling}
+                              onClick={() => setCancelTarget(alloc.id)}
+                            >
+                              {isCancelling ? "Cancelling..." : "Cancel Slot"}
+                            </Button>
 
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => openReasonDialog(alloc.id)}
-                                >
-                                  Provide Reason
-                                </Button>
-                              </>
+                            {isLive && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openReasonDialog(alloc.id)}
+                              >
+                                Provide Reason
+                              </Button>
                             )}
 
                             <Button
@@ -819,16 +812,17 @@ export function ScheduleClient({
                 <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">
                   EXCO
                 </span>{" "}
-                tag marks the member on duty to open/close the range. When no
-                EXCO is assigned, the grey row shows{" "}
-                <span className="text-amber-700">
-                  ⚠ Teacher opens range
+                tag marks the member on duty to open/close the range. When the
+                day&rsquo;s first or last session has no EXCO on duty, an amber{" "}
+                <span className="rounded bg-amber-50 px-1 text-[10px] font-medium text-amber-700">
+                  ↑ TIC opens range
                 </span>{" "}
-                for the first session of the day and{" "}
-                <span className="text-amber-700">
-                  ⚠ Teacher closes range
+                row at the top of the column and{" "}
+                <span className="rounded bg-amber-50 px-1 text-[10px] font-medium text-amber-700">
+                  ↓ TIC closes range
                 </span>{" "}
-                for the last. An orange{" "}
+                row at the bottom flag that the TIC must open or close the range
+                that day. An orange{" "}
                 <span className="rounded bg-orange-100 px-1 text-[10px] font-semibold text-orange-800">
                   LATE
                 </span>{" "}
@@ -854,6 +848,24 @@ export function ScheduleClient({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
+                    {weekDayColumns.some(
+                      (c) => dayCoverage[c.day]?.opensNeedTIC
+                    ) && (
+                      <TableRow className="hover:bg-transparent">
+                        {weekDayColumns.map((col) => (
+                          <TableCell
+                            key={col.day}
+                            className="py-1.5 text-center align-middle"
+                          >
+                            {dayCoverage[col.day]?.opensNeedTIC && (
+                              <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                                ↑ TIC opens range
+                              </span>
+                            )}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    )}
                     {timeSlots.map((slot) => {
                       const segments = buildHeaderSegments(
                         weekDayColumns,
@@ -882,11 +894,6 @@ export function ScheduleClient({
                                     timeLabel
                                   )}
                                 </div>
-                                {seg.coverText && (
-                                  <div className="mt-0.5 text-[11px] font-normal text-amber-700">
-                                    {seg.coverText}
-                                  </div>
-                                )}
                               </TableCell>
                             );
                           })}
@@ -971,6 +978,24 @@ export function ScheduleClient({
                       </Fragment>
                       );
                     })}
+                    {weekDayColumns.some(
+                      (c) => dayCoverage[c.day]?.closesNeedTIC
+                    ) && (
+                      <TableRow className="hover:bg-transparent">
+                        {weekDayColumns.map((col) => (
+                          <TableCell
+                            key={col.day}
+                            className="py-1.5 text-center align-middle"
+                          >
+                            {dayCoverage[col.day]?.closesNeedTIC && (
+                              <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                                ↓ TIC closes range
+                              </span>
+                            )}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </div>

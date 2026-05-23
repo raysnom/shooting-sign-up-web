@@ -67,7 +67,7 @@
   - Detect clashes during assignment
   - Attempt to move member to next preference (max 1 level drop)
   - If threshold exceeded, keep original slot and flag clash warning
-- [x] Implement `exco-duty.ts` — randomly select training EXCO per session
+- [x] Implement `exco-duty.ts` — load-balanced (least-loaded-first) selection of training EXCO per session for fair weekly duty distribution
 - [x] Write allocations + exco_duty rows to database (draft-actions.ts server action)
 - [x] Build draft results review page (President) — verify before publishing
 
@@ -109,7 +109,7 @@
 - [x] Caching — tagged `unstable_cache` helpers in `src/lib/cache.ts` for stable admin reads; `updateTag()` invalidation in admin server actions
 - [x] Optimistic UI — `useOptimistic` on cancel allocation, attendance marking, special-event toggling, preferences submit
 - [x] Tooltips — Base UI tooltip in `src/components/ui/tooltip.tsx`, applied to priority score factors and status badges
-- [x] Full Schedule grid — weekly day-column × session-row table in `/schedule` showing all allocations, with per-cell highlights for shared-gun clashes (yellow), EXCO-on-duty members (amber `EXCO` pill), and per-session "Teacher opens / closes range" notices when no EXCO is assigned
+- [x] Full Schedule grid — weekly day-column × session-row table in `/schedule` showing all allocations, with per-cell highlights for shared-gun clashes (yellow), EXCO-on-duty members (amber `EXCO` pill), and top/bottom "↑ TIC opens range" / "↓ TIC closes range" rows per day when the opening/closing session has no EXCO on duty
 - [ ] Error handling improvements — replace remaining technical errors with user-friendly messages
 - [~] Bulk attendance upload (historical data) — **descoped**, club is starting fresh on this system
 - [~] Email notifications — **descoped**, members check the website directly
@@ -165,7 +165,7 @@ Ideas for future iterations:
 - [ ] **Integration with school calendar** — Auto-cancel sessions on school holidays
 - [ ] **Multi-semester planning** — Presidents can set up templates and requirements for future semesters in advance
 - [ ] **Member self-service profile updates** — Members can update their own contact info (email, phone)
-- [ ] **EXCO duty scheduling** — Algorithm for fair rotation of EXCO duty across members
+- [x] **EXCO duty scheduling** — Algorithm for fair rotation of EXCO duty across members (load-balanced least-loaded-first selection in `exco-duty.ts`)
 
 ---
 
