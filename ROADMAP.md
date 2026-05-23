@@ -109,7 +109,7 @@
 - [x] Caching — tagged `unstable_cache` helpers in `src/lib/cache.ts` for stable admin reads; `updateTag()` invalidation in admin server actions
 - [x] Optimistic UI — `useOptimistic` on cancel allocation, attendance marking, special-event toggling, preferences submit
 - [x] Tooltips — Base UI tooltip in `src/components/ui/tooltip.tsx`, applied to priority score factors and status badges
-- [x] Full Schedule grid — weekly day-column × session-row table in `/schedule` showing all allocations, with per-cell highlights for shared-gun clashes (yellow), EXCO-on-duty members (amber `EXCO` pill), and top/bottom "↑ TIC opens range" / "↓ TIC closes range" rows per day when the opening/closing session has no EXCO on duty
+- [x] Full Schedule grid — weekly day-column × session-row table in `/schedule` showing all allocations, with per-cell highlights for shared-gun clashes (yellow), EXCO-on-duty members (purple `EXCO` pill), and "↑ TIC opens range" / "↓ TIC closes range" rows placed above each day's opening/closing session when it has no EXCO on duty
 - [ ] Error handling improvements — replace remaining technical errors with user-friendly messages
 - [~] Bulk attendance upload (historical data) — **descoped**, club is starting fresh on this system
 - [~] Email notifications — **descoped**, members check the website directly

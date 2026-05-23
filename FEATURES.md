@@ -24,9 +24,9 @@ Two tabs:
 - Days run across as columns (with dates); each session is a grey header row that lists the timing and spans the days that share it (e.g. Mon–Fri timing merges into one cell, Saturday's different timing sits separately under the Saturday column).
 - Members are listed in cells under each day — **live fire bold**, **dry fire italic grey**.
 - **Yellow cell** = that member has a shared-gun clash within the session. Hover the cell to see who they're sharing with.
-- **Amber `EXCO` pill** next to a name = that member is on EXCO duty to open/close the range for that session.
+- **Purple `EXCO` pill** next to a name = that member is on EXCO duty to open/close the range for that session.
 - **Orange `LATE` pill** next to a name = that member has indicated they'll arrive ~30 min late.
-- If the day's first or last session has no EXCO on duty, an amber **↑ TIC opens range** row appears at the top of that day's column and a **↓ TIC closes range** row at the bottom — so the TIC (Teacher-in-Charge) knows when their physical presence is required to open or close the range.
+- If the day's first or last session has no EXCO on duty, an amber **↑ TIC opens range** row appears above that day's first session and a **↓ TIC closes range** row above its last session — so the TIC (Teacher-in-Charge) knows when their physical presence is required to open or close the range.
 - Your own name is highlighted in blue with a `(you)` tag.
 
 **When to use:** Check this every Saturday evening after 8pm to see your training schedule for the upcoming week, and use the Full Schedule tab to find out who else is shooting alongside you.

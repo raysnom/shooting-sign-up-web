@@ -314,8 +314,9 @@ export function ScheduleClient({
 
   // Per-day range-opening/closing coverage. The opener is the day's first
   // session and the closer is its last; if either has no EXCO on duty, the
-  // TIC is responsible for that action (surfaced as a row at the top/bottom
-  // of the grid rather than buried in the per-session header).
+  // TIC is responsible for that action. `closerOrdinal` is the 0-based index
+  // of the closing session within the day so the "TIC closes range" row can be
+  // placed at the top of that session's block (not at the bottom of the grid).
   const dayCoverage = useMemo(() => {
     const sessionsByDay = new Map<DayType, Session[]>();
     for (const session of sessions) {
@@ -324,7 +325,10 @@ export function ScheduleClient({
       sessionsByDay.set(session.day as DayType, list);
     }
     const coverage: Partial<
-      Record<DayType, { opensNeedTIC: boolean; closesNeedTIC: boolean }>
+      Record<
+        DayType,
+        { opensNeedTIC: boolean; closesNeedTIC: boolean; closerOrdinal: number }
+      >
     > = {};
     for (const [day, list] of sessionsByDay) {
       const sorted = [...list].sort((a, b) =>
@@ -335,6 +339,7 @@ export function ScheduleClient({
       coverage[day] = {
         opensNeedTIC: !!first && !sessionsWithDuty.has(first.id),
         closesNeedTIC: !!last && !sessionsWithDuty.has(last.id),
+        closerOrdinal: sorted.length - 1,
       };
     }
     return coverage;
@@ -703,7 +708,7 @@ export function ScheduleClient({
                     return (
                       <Card key={alloc.id}>
                         {hasExcoDuty && (
-                          <div className="rounded-t-xl bg-amber-100 px-4 py-2 text-xs font-semibold text-amber-800">
+                          <div className="rounded-t-xl bg-purple-100 px-4 py-2 text-xs font-semibold text-purple-800">
                             You are on EXCO duty &mdash; responsible for
                             opening/closing the range
                           </div>
@@ -808,8 +813,8 @@ export function ScheduleClient({
               <p className="text-xs text-muted-foreground">
                 Live fire allocations are bold; dry fire allocations are shown
                 in italic grey. Yellow cells indicate a shared-gun clash within
-                the session. An amber{" "}
-                <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">
+                the session. A purple{" "}
+                <span className="rounded bg-purple-100 px-1 text-[10px] font-semibold text-purple-800">
                   EXCO
                 </span>{" "}
                 tag marks the member on duty to open/close the range. When the
@@ -817,12 +822,12 @@ export function ScheduleClient({
                 <span className="rounded bg-amber-50 px-1 text-[10px] font-medium text-amber-700">
                   ↑ TIC opens range
                 </span>{" "}
-                row at the top of the column and{" "}
+                row above its first session and{" "}
                 <span className="rounded bg-amber-50 px-1 text-[10px] font-medium text-amber-700">
                   ↓ TIC closes range
                 </span>{" "}
-                row at the bottom flag that the TIC must open or close the range
-                that day. An orange{" "}
+                row above its last session flag that the TIC must open or close
+                the range that day. An orange{" "}
                 <span className="rounded bg-orange-100 px-1 text-[10px] font-semibold text-orange-800">
                   LATE
                 </span>{" "}
@@ -898,6 +903,29 @@ export function ScheduleClient({
                             );
                           })}
                         </TableRow>
+                        {weekDayColumns.some(
+                          (c) =>
+                            dayCoverage[c.day]?.closesNeedTIC &&
+                            dayCoverage[c.day]?.closerOrdinal ===
+                              slot.ordinal - 1
+                        ) && (
+                          <TableRow className="hover:bg-transparent">
+                            {weekDayColumns.map((col) => (
+                              <TableCell
+                                key={col.day}
+                                className="py-1 text-center align-middle"
+                              >
+                                {dayCoverage[col.day]?.closesNeedTIC &&
+                                  dayCoverage[col.day]?.closerOrdinal ===
+                                    slot.ordinal - 1 && (
+                                    <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                                      ↓ TIC closes range
+                                    </span>
+                                  )}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        )}
                         {slot.maxRows === 0 ? (
                           <TableRow>
                             <TableCell
@@ -954,7 +982,7 @@ export function ScheduleClient({
                                     >
                                       {alloc.members.name}
                                       {onDuty && (
-                                        <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] font-semibold text-amber-800">
+                                        <span className="ml-1 rounded bg-purple-100 px-1 text-[10px] font-semibold text-purple-800">
                                           EXCO
                                         </span>
                                       )}
@@ -978,24 +1006,6 @@ export function ScheduleClient({
                       </Fragment>
                       );
                     })}
-                    {weekDayColumns.some(
-                      (c) => dayCoverage[c.day]?.closesNeedTIC
-                    ) && (
-                      <TableRow className="hover:bg-transparent">
-                        {weekDayColumns.map((col) => (
-                          <TableCell
-                            key={col.day}
-                            className="py-1.5 text-center align-middle"
-                          >
-                            {dayCoverage[col.day]?.closesNeedTIC && (
-                              <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
-                                ↓ TIC closes range
-                              </span>
-                            )}
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    )}
                   </TableBody>
                 </Table>
               </div>
