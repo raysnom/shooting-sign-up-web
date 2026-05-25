@@ -4,6 +4,7 @@ import type {
   Week,
   TrainingRequirement,
   Attendance,
+  Allocation,
   Member,
   SpecialEvent,
   SpecialEventAttendance,
@@ -64,6 +65,7 @@ export default async function CompliancePage({
   const [
     { data: requirements },
     { data: attendanceRecords },
+    { data: allocationRecords },
     { data: members },
     { data: specialEventsData },
   ] = await Promise.all([
@@ -75,6 +77,11 @@ export default async function CompliancePage({
       .from("attendance")
       .select("*")
       .eq("week_id", weekId),
+    supabase
+      .from("allocations")
+      .select("member_id, session_id")
+      .eq("week_id", weekId)
+      .eq("cancelled", false),
     supabase
       .from("members")
       .select("*")
@@ -103,7 +110,17 @@ export default async function CompliancePage({
 
   const typedRequirements = (requirements as TrainingRequirement[]) ?? [];
   const typedAttendance = (attendanceRecords as Attendance[]) ?? [];
+  const typedAllocations =
+    (allocationRecords as Pick<Allocation, "member_id" | "session_id">[]) ?? [];
   const typedMembers = (members as Member[]) ?? [];
+
+  // Everyone allocated to a regular session is assumed present unless they were
+  // explicitly marked absent/no_show, so only absences need to be tracked.
+  const absentKeys = new Set(
+    typedAttendance
+      .filter((a) => a.status === "absent" || a.status === "no_show")
+      .map((a) => `${a.member_id}_${a.session_id}`)
+  );
 
   // Build compliance data per member
   const complianceMembers: ComplianceMember[] = typedMembers.map((member) => {
@@ -126,11 +143,12 @@ export default async function CompliancePage({
       }
     }
 
-    // Count attended regular sessions: "present" or "vr"
-    const regularAttendanceCount = typedAttendance.filter(
-      (a) =>
-        a.member_id === member.id &&
-        (a.status === "present" || a.status === "vr")
+    // Count attended regular sessions: an allocation counts as attended unless
+    // the member was explicitly marked absent/no_show for that session.
+    const regularAttendanceCount = typedAllocations.filter(
+      (alloc) =>
+        alloc.member_id === member.id &&
+        !absentKeys.has(`${alloc.member_id}_${alloc.session_id}`)
     ).length;
 
     // Count special event attendance for this member

@@ -50,7 +50,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 
@@ -74,22 +73,6 @@ function statusLabel(status: AttendanceStatus): string {
       return "No Show";
     default:
       return status;
-  }
-}
-
-function statusBadgeVariant(
-  status: AttendanceStatus
-): "default" | "secondary" | "destructive" | "outline" {
-  switch (status) {
-    case "present":
-      return "default";
-    case "vr":
-      return "secondary";
-    case "absent":
-    case "no_show":
-      return "destructive";
-    default:
-      return "outline";
   }
 }
 
@@ -185,11 +168,6 @@ export function AttendanceClient({
       }
     );
 
-  // VR dialog state
-  const [vrDialogOpen, setVrDialogOpen] = useState(false);
-  const [vrMemberId, setVrMemberId] = useState<string>("");
-  const [vrReason, setVrReason] = useState("");
-
   // Special event create dialog state
   const [createEventDialogOpen, setCreateEventDialogOpen] = useState(false);
   const [newEventName, setNewEventName] = useState("");
@@ -252,24 +230,17 @@ export function AttendanceClient({
     [allocations, selectedSessionId, selectedWeekId]
   );
 
-  // Summary stats
+  // Summary stats. Everyone is assumed present by default, so the only thing
+  // that needs marking is an absence — present = total minus explicit absences.
   const summaryStats = useMemo(() => {
     const totalAllocated = sessionAllocations.length;
-    const presentCount = sessionAllocations.filter((a) => {
-      const att = getAttendance(a.member_id, a.session_id, a.week_id);
-      return att?.status === "present";
-    }).length;
     const absentCount = sessionAllocations.filter((a) => {
       const att = getAttendance(a.member_id, a.session_id, a.week_id);
       return att?.status === "absent" || att?.status === "no_show";
     }).length;
-    const vrCount = sessionAllocations.filter((a) => {
-      const att = getAttendance(a.member_id, a.session_id, a.week_id);
-      return att?.status === "vr";
-    }).length;
-    const notMarkedCount = totalAllocated - presentCount - absentCount - vrCount;
+    const presentCount = totalAllocated - absentCount;
 
-    return { totalAllocated, presentCount, absentCount, vrCount, notMarkedCount };
+    return { totalAllocated, presentCount, absentCount };
   }, [sessionAllocations, getAttendance]);
 
   const handleMark = useCallback(
@@ -308,20 +279,6 @@ export function AttendanceClient({
     },
     [selectedSessionId, selectedWeekId, applyOptimisticAttendance]
   );
-
-  const openVrDialog = useCallback((memberId: string) => {
-    setVrMemberId(memberId);
-    setVrReason("");
-    setVrDialogOpen(true);
-  }, []);
-
-  const handleVrSubmit = useCallback(async () => {
-    if (!vrMemberId) return;
-    await handleMark(vrMemberId, "vr", vrReason);
-    setVrDialogOpen(false);
-    setVrMemberId("");
-    setVrReason("");
-  }, [vrMemberId, vrReason, handleMark]);
 
   // ── Special Events helpers ──
 
@@ -544,7 +501,7 @@ export function AttendanceClient({
 
       {/* Summary Stats */}
       {selectedSessionId && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
+        <div className="grid grid-cols-3 gap-4">
           <Card size="sm">
             <CardHeader className="pb-1">
               <CardTitle className="text-xs font-medium text-muted-foreground">
@@ -577,28 +534,6 @@ export function AttendanceClient({
               <p className="text-2xl font-bold text-red-600">{summaryStats.absentCount}</p>
             </CardContent>
           </Card>
-          <Card size="sm">
-            <CardHeader className="pb-1">
-              <CardTitle className="text-xs font-medium text-muted-foreground">
-                Valid Reason
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-amber-600">{summaryStats.vrCount}</p>
-            </CardContent>
-          </Card>
-          <Card size="sm">
-            <CardHeader className="pb-1">
-              <CardTitle className="text-xs font-medium text-muted-foreground">
-                Not Marked
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold text-gray-400">
-                {summaryStats.notMarkedCount}
-              </p>
-            </CardContent>
-          </Card>
         </div>
       )}
 
@@ -628,7 +563,10 @@ export function AttendanceClient({
                     alloc.session_id,
                     alloc.week_id
                   );
-                  const currentStatus = att?.status;
+                  // Absence is the only thing marked; everything else (no
+                  // record, or an explicit "present") counts as present.
+                  const isAbsent =
+                    att?.status === "absent" || att?.status === "no_show";
 
                   return (
                     <TableRow key={alloc.id}>
@@ -655,31 +593,18 @@ export function AttendanceClient({
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {currentStatus ? (
-                          <div className="flex items-center gap-2">
-                            <Badge variant={statusBadgeVariant(currentStatus)}>
-                              {statusLabel(currentStatus)}
-                            </Badge>
-                            {currentStatus === "vr" && att?.reason && (
-                              <span className="text-xs text-muted-foreground">
-                                ({att.reason})
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-sm text-gray-400">
-                            Not marked
-                          </span>
-                        )}
+                        {/* Everyone is present by default; only an explicit
+                            absence flips the badge. */}
+                        <Badge
+                          variant={isAbsent ? "destructive" : "default"}
+                        >
+                          {isAbsent ? "Absent" : "Present"}
+                        </Badge>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button
-                            variant={
-                              currentStatus === "present"
-                                ? "default"
-                                : "outline"
-                            }
+                            variant={isAbsent ? "outline" : "default"}
                             size="sm"
                             onClick={() =>
                               handleMark(alloc.member_id, "present")
@@ -689,12 +614,7 @@ export function AttendanceClient({
                             Present
                           </Button>
                           <Button
-                            variant={
-                              currentStatus === "absent" ||
-                              currentStatus === "no_show"
-                                ? "destructive"
-                                : "outline"
-                            }
+                            variant={isAbsent ? "destructive" : "outline"}
                             size="sm"
                             onClick={() =>
                               handleMark(alloc.member_id, "absent")
@@ -702,16 +622,6 @@ export function AttendanceClient({
                             disabled={loading}
                           >
                             Absent
-                          </Button>
-                          <Button
-                            variant={
-                              currentStatus === "vr" ? "secondary" : "outline"
-                            }
-                            size="sm"
-                            onClick={() => openVrDialog(alloc.member_id)}
-                            disabled={loading}
-                          >
-                            VR
                           </Button>
                         </div>
                       </TableCell>
@@ -900,39 +810,6 @@ export function AttendanceClient({
               }
             >
               {eventLoading ? "Creating..." : "Create Event"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* VR Reason Dialog */}
-      <Dialog open={vrDialogOpen} onOpenChange={setVrDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Valid Reason</DialogTitle>
-            <DialogDescription>
-              Enter the reason for this member&apos;s absence with a valid
-              reason.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Reason</label>
-            <Textarea
-              placeholder="e.g., Medical appointment, academic commitment..."
-              value={vrReason}
-              onChange={(e) => setVrReason(e.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setVrDialogOpen(false)}
-              disabled={loading}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleVrSubmit} disabled={loading}>
-              {loading ? "Saving..." : "Mark as VR"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -811,8 +811,9 @@ export function ScheduleClient({
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
                 Live fire allocations are bold; dry fire allocations are shown
-                in italic grey. Yellow cells indicate a shared-gun clash within
-                the session. A purple{" "}
+                in italic grey. Within each session members are numbered &mdash;
+                live firers first (1, 2, 3&hellip;), then dry firers restart at
+                1. Yellow cells indicate a shared-gun clash within the session. A purple{" "}
                 <span className="rounded bg-purple-100 px-1 text-[10px] font-semibold text-purple-800">
                   EXCO
                 </span>{" "}
@@ -952,6 +953,18 @@ export function ScheduleClient({
                                   const isMe =
                                     alloc.member_id === currentMemberId;
                                   const isLive = alloc.type === "live";
+                                  // Number within the cell: live fire first
+                                  // (1..n), then dry fire restarts at 1. Cells
+                                  // are pre-sorted live-first, so the live
+                                  // count gives the dry offset.
+                                  const cellAllocs =
+                                    slot.cellsByDay[col.day] ?? [];
+                                  const liveCount = cellAllocs.filter(
+                                    (a) => a.type === "live"
+                                  ).length;
+                                  const seq = isLive
+                                    ? rowIdx + 1
+                                    : rowIdx - liveCount + 1;
                                   const hasClash =
                                     isLive && !!alloc.gun_clash_warning;
                                   const onDuty = dutyByAllocation.has(
@@ -979,6 +992,9 @@ export function ScheduleClient({
                                       )}
                                       title={title}
                                     >
+                                      <span className="mr-1 tabular-nums text-muted-foreground">
+                                        {seq}.
+                                      </span>
                                       {alloc.members.name}
                                       {onDuty && (
                                         <span className="ml-1 rounded bg-purple-100 px-1 text-[10px] font-semibold text-purple-800">

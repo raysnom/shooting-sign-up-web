@@ -304,6 +304,47 @@ export async function claimLeftoverSlot(
 
   if (insertError) return { error: sanitizeDbError(insertError) };
 
+  // The leftover-claim path bypasses the draft algorithm, so it must replicate
+  // the algorithm's soft gun-clash flag itself. If this is a live claim with an
+  // assigned gun, recompute the clash warning for everyone sharing that gun in
+  // this session and write it to all affected rows (the claimer AND anyone they
+  // now clash with) so the schedule highlights them in yellow. See
+  // resolveGunClashes() for the canonical message format.
+  if (finalType === "live" && memberGunId) {
+    const { data: sharers } = await admin
+      .from("allocations")
+      .select("id, member_id")
+      .eq("session_id", sessionId)
+      .eq("type", "live")
+      .eq("gun_id", memberGunId)
+      .eq("cancelled", false);
+
+    if (sharers && sharers.length >= 2) {
+      const { data: memberRows } = await admin
+        .from("members")
+        .select("id, name")
+        .in(
+          "id",
+          sharers.map((s) => s.member_id)
+        );
+      const nameById = new Map<string, string>(
+        (memberRows ?? []).map((m) => [m.id, m.name as string])
+      );
+
+      await Promise.all(
+        sharers.map((row) => {
+          const others = sharers
+            .filter((r) => r.member_id !== row.member_id)
+            .map((r) => nameById.get(r.member_id) ?? "another member");
+          return admin
+            .from("allocations")
+            .update({ gun_clash_warning: `Sharing gun with ${others.join(", ")}` })
+            .eq("id", row.id);
+        })
+      );
+    }
+  }
+
   revalidatePath("/schedule");
   return { success: true, type: finalType };
 }
