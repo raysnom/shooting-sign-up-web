@@ -1,5 +1,6 @@
 import { getCurrentUser } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { Week, Allocation, Session, ExcoDuty, TeamType } from "@/types/database";
 import { ScheduleClient } from "./schedule-client";
 
@@ -19,6 +20,11 @@ export type AllocationWithSessionAndMember = Allocation & {
 export default async function SchedulePage() {
   const member = await getCurrentUser();
   const supabase = await createClient();
+  // Full per-session roster is shared schedule data every member is meant to
+  // see, but RLS (`allocations_select_own`) hides other members' rows from
+  // regular members. Use the admin client for the all-members fetch so the
+  // roster + "leftover slots" capacity hints are computed against real counts.
+  const admin = createAdminClient();
 
   // ── 1. Find the most recent published or drafted week ──
   const { data: publishedWeeks } = await supabase
@@ -89,7 +95,7 @@ export default async function SchedulePage() {
       .eq("member_id", member.id)
       .eq("week_id", activeWeek.id)
       .eq("cancelled", false),
-    supabase
+    admin
       .from("allocations")
       .select("*, sessions(*), members(id, name, team)")
       .eq("week_id", activeWeek.id)

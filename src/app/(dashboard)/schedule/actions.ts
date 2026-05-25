@@ -200,8 +200,15 @@ export async function claimLeftoverSlot(
 
   const weekId = week.id;
 
+  // IMPORTANT: capacity and ownership counts MUST run on the admin (service-role)
+  // client. The RLS policy `allocations_select_own` only lets a regular member
+  // SELECT their own allocation rows, so counting session usage with the
+  // user-scoped client would return ~0 and every claim would be granted live
+  // fire — blowing past the live-lane cap. The admin client sees all rows.
+  const admin = createAdminClient();
+
   // Caller must not already hold an active allocation for this session
-  const { data: existingAlloc } = await supabase
+  const { data: existingAlloc } = await admin
     .from("allocations")
     .select("id")
     .eq("member_id", userId)
@@ -212,9 +219,9 @@ export async function claimLeftoverSlot(
     return { error: "You already have an allocation for this session." };
   }
 
-  // Decide type by counting current usage
+  // Decide type by counting current usage (admin client — see note above)
   const decideType = async (): Promise<"live" | "dry" | null> => {
-    const { count: liveUsed } = await supabase
+    const { count: liveUsed } = await admin
       .from("allocations")
       .select("id", { count: "exact", head: true })
       .eq("session_id", sessionId)
@@ -222,7 +229,7 @@ export async function claimLeftoverSlot(
       .eq("cancelled", false);
     if ((liveUsed ?? 0) < session.live_lanes) return "live";
 
-    const { count: dryUsed } = await supabase
+    const { count: dryUsed } = await admin
       .from("allocations")
       .select("id", { count: "exact", head: true })
       .eq("session_id", sessionId)
@@ -249,8 +256,6 @@ export async function claimLeftoverSlot(
     memberGunId = memberRow?.gun_id ?? null;
   }
 
-  const admin = createAdminClient();
-
   // Re-check capacity right before insert to narrow the race window.
   const recheckType = await decideType();
   if (!recheckType) return { error: "No leftover slots available for this session." };
@@ -260,7 +265,7 @@ export async function claimLeftoverSlot(
   // Enforce the week-level live cap — checked against finalType so a recheck
   // that flips dry -> live (e.g. someone cancelled live) still respects the cap.
   if (finalType === "live" && week.max_live_per_member !== null) {
-    const { count: memberLiveCount } = await supabase
+    const { count: memberLiveCount } = await admin
       .from("allocations")
       .select("id", { count: "exact", head: true })
       .eq("member_id", userId)
