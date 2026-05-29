@@ -67,6 +67,63 @@ export function formatDeadline(input: string | Date): string {
 }
 
 // ──────────────────────────────────────────────
+// Session timing
+// ──────────────────────────────────────────────
+
+// Day-of-week offsets from a week's Monday start_date.
+const DAY_OFFSETS: Record<string, number> = {
+  mon: 0,
+  tue: 1,
+  wed: 2,
+  thu: 3,
+  fri: 4,
+  sat: 5,
+};
+
+/**
+ * Compute the exact instant a session ends.
+ *
+ * A session is stored as a week start_date ("YYYY-MM-DD", the Monday), a
+ * day-of-week, and a wall-clock time_end ("HH:MM" or "HH:MM:SS"). Wall-clock
+ * times are Singapore Time (SGT, UTC+8, no DST), so we build the instant with
+ * an explicit +08:00 offset. This stays correct regardless of the runtime's
+ * timezone — important because Vercel servers run in UTC.
+ *
+ * Returns null if the day is unrecognized.
+ */
+export function sessionEndInstant(
+  weekStartDate: string,
+  day: string,
+  timeEnd: string
+): Date | null {
+  const offset = DAY_OFFSETS[day];
+  if (offset === undefined) return null;
+  const [y, m, d] = weekStartDate.slice(0, 10).split("-").map(Number);
+  // Date.UTC normalizes day overflow across months; midnight UTC keeps the
+  // ISO date equal to the calendar date.
+  const sessionDate = new Date(Date.UTC(y, m - 1, d + offset));
+  const dateStr = sessionDate.toISOString().slice(0, 10);
+  const time = timeEnd.length === 5 ? `${timeEnd}:00` : timeEnd;
+  return new Date(`${dateStr}T${time}+08:00`);
+}
+
+/**
+ * True if the session's end time is in the past (relative to `now`, which
+ * defaults to the current instant). Unrecognized days return false (never
+ * treated as ended).
+ */
+export function hasSessionEnded(
+  weekStartDate: string,
+  day: string,
+  timeEnd: string,
+  now: Date = new Date()
+): boolean {
+  const end = sessionEndInstant(weekStartDate, day, timeEnd);
+  if (!end) return false;
+  return now.getTime() > end.getTime();
+}
+
+// ──────────────────────────────────────────────
 // Internal
 // ──────────────────────────────────────────────
 

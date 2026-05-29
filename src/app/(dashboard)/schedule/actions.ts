@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import { isValidUUID, sanitizeDbError } from "@/lib/utils/validation";
 import { rateLimit } from "@/lib/utils/rate-limit";
+import { hasSessionEnded } from "@/lib/utils/datetime";
 
 // ──────────────────────────────────────────────
 // Auth helper
@@ -183,10 +184,17 @@ export async function claimLeftoverSlot(
     .single<{
       id: string;
       week_id: string;
+      day: string;
+      time_end: string;
       live_lanes: number;
       dry_lanes: number;
       is_cancelled: boolean;
-      weeks: { id: string; status: string; max_live_per_member: number | null } | null;
+      weeks: {
+        id: string;
+        status: string;
+        start_date: string;
+        max_live_per_member: number | null;
+      } | null;
     }>();
 
   if (sessionError || !session) return { error: "Session not found." };
@@ -196,6 +204,11 @@ export async function claimLeftoverSlot(
   if (!week) return { error: "Week not found for this session." };
   if (week.status !== "published") {
     return { error: "Leftover slots can only be claimed once the week is published." };
+  }
+
+  // A session can't be claimed once its end time has passed.
+  if (hasSessionEnded(week.start_date, session.day, session.time_end)) {
+    return { error: "This session has already ended." };
   }
 
   const weekId = week.id;

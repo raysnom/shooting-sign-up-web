@@ -5,7 +5,7 @@ import type { Week, Session, ExcoDuty, DayType } from "@/types/database";
 import type { AllocationWithSession, AllocationWithSessionAndMember } from "./page";
 import { DAY_LABELS, TEAM_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
-import { formatDate, formatTime } from "@/lib/utils/datetime";
+import { formatDate, formatTime, hasSessionEnded } from "@/lib/utils/datetime";
 import {
   cancelAllocation,
   submitAbsenceReason,
@@ -357,6 +357,10 @@ export function ScheduleClient({
     if (week.status !== "published") return [];
 
     return sessions
+      .filter(
+        (session) =>
+          !hasSessionEnded(week.start_date, session.day, session.time_end)
+      )
       .map((session) => {
         const allocs = allocationsBySession.get(session.id) || [];
         const liveUsed = allocs.filter((a) => a.type === "live").length;
@@ -372,7 +376,7 @@ export function ScheduleClient({
         if (dayOrderA !== dayOrderB) return dayOrderA - dayOrderB;
         return a.session.time_start.localeCompare(b.session.time_start);
       });
-  }, [week.status, sessions, allocationsBySession]);
+  }, [week.status, week.start_date, sessions, allocationsBySession]);
 
   const handleClaim = useCallback(
     (sessionId: string) => {

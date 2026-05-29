@@ -23,6 +23,7 @@ const navItems: NavItem[] = [
   { label: "Profile", href: "/profile", roles: ["member", "exco", "president"] },
   // EXCO routes
   { label: "Attendance", href: "/attendance", roles: ["exco", "president"], admin: true },
+  { label: "Attendance Overview", href: "/attendance/overview", roles: ["president"], admin: true },
   { label: "Guns", href: "/guns", roles: ["exco", "president"], admin: true },
   // President routes
   { label: "Sessions", href: "/sessions", roles: ["president"], admin: true },

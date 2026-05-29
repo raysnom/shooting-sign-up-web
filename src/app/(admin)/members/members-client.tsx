@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import type { Member, TeamType, LevelType, RoleType, DivisionType } from "@/types/database";
 import { DIVISION_MAP, DIVISION_LABELS } from "@/lib/constants";
 import {
@@ -63,6 +63,7 @@ export function MembersClient({ members }: { members: Member[] }) {
   const [message, setMessage] = useState<string | null>(null);
   const [messageType, setMessageType] = useState<"error" | "success">("success");
   const [filter, setFilter] = useState<"active" | "archived">("active");
+  const [search, setSearch] = useState("");
   const [filterTeam, setFilterTeam] = useState<TeamType | "all">("all");
   const [filterLevel, setFilterLevel] = useState<LevelType | "all">("all");
   const [filterDivision, setFilterDivision] = useState<DivisionType | "all">("all");
@@ -88,12 +89,19 @@ export function MembersClient({ members }: { members: Member[] }) {
     const active = members.filter((m) => !m.archived);
     const archived = members.filter((m) => m.archived);
 
+    const query = search.trim().toLowerCase();
+
     const filtered = members.filter((m) => {
       if (filter === "active" && m.archived) return false;
       if (filter === "archived" && !m.archived) return false;
       if (filterTeam !== "all" && m.team !== filterTeam) return false;
       if (filterLevel !== "all" && m.level !== filterLevel) return false;
       if (filterDivision !== "all" && DIVISION_MAP[m.level] !== filterDivision) return false;
+      if (
+        query &&
+        !`${m.name} ${m.login_id} ${m.email}`.toLowerCase().includes(query)
+      )
+        return false;
       return true;
     });
 
@@ -102,7 +110,7 @@ export function MembersClient({ members }: { members: Member[] }) {
       activeCount: active.length,
       archivedCount: archived.length,
     };
-  }, [members, filter, filterTeam, filterLevel, filterDivision]);
+  }, [members, filter, search, filterTeam, filterLevel, filterDivision]);
 
   // Pagination derived values
   const totalFiltered = filteredMembers.length;
@@ -115,10 +123,15 @@ export function MembersClient({ members }: { members: Member[] }) {
     [filteredMembers, startIndex, endIndex],
   );
 
-  // Reset to first page whenever filters / search change
-  useEffect(() => {
+  // Reset to the first page whenever the filters/search change. Adjusting state
+  // during render (React's recommended pattern) avoids the cascading re-render
+  // that a setState-in-effect would cause.
+  const filterKey = `${filter}|${search}|${filterTeam}|${filterLevel}|${filterDivision}|${pageSize}`;
+  const [prevFilterKey, setPrevFilterKey] = useState(filterKey);
+  if (filterKey !== prevFilterKey) {
+    setPrevFilterKey(filterKey);
     setPageIndex(0);
-  }, [filter, filterTeam, filterLevel, filterDivision, pageSize]);
+  }
 
   // ──────────────────────────────────────────────
   // Callbacks
@@ -409,6 +422,15 @@ export function MembersClient({ members }: { members: Member[] }) {
       )}
 
       <div className="flex flex-wrap items-end gap-4">
+        <div className="relative w-full sm:w-64">
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, login ID, or email"
+            aria-label="Search members"
+          />
+        </div>
         <div className="flex gap-2">
           <Button
             variant={filter === "active" ? "default" : "outline"}

@@ -120,7 +120,7 @@ Archive them on the *Members* page. Their historical data (attendance, scores) i
 The draft won't assign you opening-range duty for that session. Another EXCO gets it. Useful when you know a class will run late and you'd otherwise be the opener.
 
 *Q: A member says they didn't submit preferences but their slot appeared on the schedule. Bug?*
-Not a bug. Members who skipped the preference deadline can claim *leftover* slots from their Schedule page once the week is published — the system auto-gives them live fire if available, otherwise dry. This only works if they submitted *zero* preferences; members who submitted prefs (even badly-ranked) are locked to whatever the draft gave them.
+Not a bug. Members who skipped the preference deadline can claim *leftover* slots from their Schedule page once the week is published — the system auto-gives them live fire if available, otherwise dry. This only works if they submitted *zero* preferences; members who submitted prefs (even badly-ranked) are locked to whatever the draft gave them. Claims close once a session ends — a finished session can't be claimed (it drops off their leftover list).
 
 *Q: A member set "Maximum live fire sessions = 0" and got no live fire. Bug?*
 Working as intended. Members can cap their own live fire (e.g. rank 6 sessions, cap at 4 = the draft gives them live fire on their best 4 by score, dry fire on the other 2). Setting it to 0 means "dry fire only this week". This cap is independent of the admin-set `Max live per member` on the week — the draft uses whichever is lower.

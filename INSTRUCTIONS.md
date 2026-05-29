@@ -42,7 +42,7 @@ After the draft runs (Sat night), open *Schedule* to see your allocated slots.
 🟡 Yellow banner = gun clash warning — look out for those.
 
 🆕 *Missed the deadline? Claim a leftover slot*
-If you didn't submit preferences for the week, open *Schedule* once the draft is published. You'll see an *Available Leftover Slots* section listing sessions with empty lanes. Click *Claim this slot* and you'll be given a live fire lane if there's one open, otherwise a dry fire spot. First come, first served. (If you submitted preferences, you don't get this — you're already in the allocation.)
+If you didn't submit preferences for the week, open *Schedule* once the draft is published. You'll see an *Available Leftover Slots* section listing sessions with empty lanes. Click *Claim this slot* and you'll be given a live fire lane if there's one open, otherwise a dry fire spot. First come, first served. (If you submitted preferences, you don't get this — you're already in the allocation.) Grab it before the session starts — once a session has ended it disappears from the list and can't be claimed.
 
 ❌ *Cancel a slot*
 1. Open *Schedule*

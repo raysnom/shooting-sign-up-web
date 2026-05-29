@@ -17,7 +17,7 @@ Two tabs:
 - **Gun clash warnings** appear as yellow banners if you share a gun with another member
 - Shows EXCO duty assignments (if you're selected to open/close the range)
 - **"I'll be ~30 min late" toggle** on each session card — tap when a lesson runs late so EXCO sees the heads-up at attendance time. If you toggle late on the day's first session and you were the EXCO opener, duty is reassigned to another EXCO automatically.
-- **Available Leftover Slots** — if you did NOT submit preferences for the current week (and the week is `published`), a new section appears listing every session that still has empty lanes. Tap **Claim this slot** on any session to claim it — the system gives you a live fire lane if one's available, otherwise a dry fire spot. First come, first served. (Members who submitted preferences don't see this — they're already in the draft allocation.)
+- **Available Leftover Slots** — if you did NOT submit preferences for the current week (and the week is `published`), a new section appears listing every session that still has empty lanes. Tap **Claim this slot** on any session to claim it — the system gives you a live fire lane if one's available, otherwise a dry fire spot. First come, first served. (Members who submitted preferences don't see this — they're already in the draft allocation.) Once a session's end time has passed it drops off this list and can no longer be claimed.
 - **Empty state:** If no schedule is published yet, shows "Schedule not yet available" message
 
 **Full Schedule** — the whole-club weekly grid

@@ -143,6 +143,7 @@ After the draft is published, sessions sometimes have unfilled lanes — either 
 - The system **auto-prefers live fire** — if there's a live fire lane open, that's what the claimer gets; otherwise they get dry fire.
 - Live fire claims still respect `weeks.max_live_per_member` (admin-set cap); dry fire is uncapped for leftover-claimers since they didn't engage with the priority-score system.
 - Claimed slots are normal allocations — the 24-hour cancellation flow and the cancel→dry-promote auto-upgrade work the same way.
+- A session can only be claimed while it is still upcoming. Once its end time has passed, the session is filtered out of the **Available Leftover Slots** list and the `claimLeftoverSlot()` server action rejects the claim ("This session has already ended"). The cutoff is enforced both client-side (filter) and server-side (authoritative), and uses Singapore Time so it stays correct on UTC servers.
 
 Members who **did** submit preferences (even if they only got 0 allocations) are **not eligible** to claim leftovers — they've already been considered by the priority-score draft. This keeps the system fair: people who engaged with the draft are committed to it, and people who skipped the draft entirely take whatever's still going.
 

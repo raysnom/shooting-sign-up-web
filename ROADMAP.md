@@ -129,6 +129,7 @@
 ### Member-controlled allocation & leftover claiming (May 2026)
 - [x] **Member-set live fire cap** — new optional `max_live_count` field on the preferences page. Members can rank 6+ sessions but cap live fire allocations at N (or set to 0 for dry-fire-only). Migration `014_add_max_live_count_to_preferences.sql`. Draft engine takes `MIN(weeks.max_live_per_member, preferences.max_live_count)` per member.
 - [x] **Post-draft leftover claiming** — members who didn't submit preferences can claim unfilled slots on their Schedule page once the week is `published`. Auto-prefers live fire, falls back to dry. New `claimLeftoverSlot()` server action in `src/app/(dashboard)/schedule/actions.ts`. Member-side eligibility is "zero preferences for the week" (members who submitted but got 0 allocations are NOT eligible — they were already considered by the draft).
+- [x] **Leftover claims close at session end** — a session can no longer be claimed once its end time has passed. Enforced client-side (ended sessions filtered out of the leftover list) and server-side in `claimLeftoverSlot()`, via `hasSessionEnded()` in `src/lib/utils/datetime.ts` (SGT-aware, correct on UTC servers).
 
 ### Member Onboarding & Instructions
 - [x] Member-facing usage instructions — drafted as a single WhatsApp broadcast message (with FAQ section) covering login credentials, weekly preference deadline, schedule check, cancellation, and VR submission. Distributed by the president directly to the club WhatsApp group; not linked from the sidebar.
